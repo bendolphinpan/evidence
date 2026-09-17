@@ -1,0 +1,5 @@
+project:
+  name: ThinkingData
+  evidence: "0.0.1"
+
+pages: ./pages

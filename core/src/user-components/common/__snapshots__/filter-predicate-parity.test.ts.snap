@@ -303,3 +303,41 @@ exports[`filter predicate parity — snowflake > slider (range and single) 1`] =
 `;
 
 exports[`filter predicate parity — snowflake > table_filter (multi-column compound state) 1`] = `"("status" IN ('active', 'pending') AND "name" IN ('O\\'Brien'))"`;
+
+exports[`filter predicate parity — thinkingdata > button_group (scalar and list) 1`] = `
+{
+  "list": "region IN ('A', 'O''Brien')",
+  "scalar": "region='O''Brien'",
+}
+`;
+
+exports[`filter predicate parity — thinkingdata > dimension_grid (scalar, list, quoted identifier) 1`] = `"category IN ('A', 'O''Brien') AND region = 'West' AND "order date" = 'x'"`;
+
+exports[`filter predicate parity — thinkingdata > dropdown (scalar and list) 1`] = `
+{
+  "list": "category IN ('A', 'O''Brien')",
+  "scalar": "category='O''Brien'",
+}
+`;
+
+exports[`filter predicate parity — thinkingdata > external (scalar and list) 1`] = `
+{
+  "list": "category IN ('A', 'O''Brien')",
+  "scalar": "category='O''Brien'",
+}
+`;
+
+exports[`filter predicate parity — thinkingdata > input_tabs (scalar) 1`] = `"status='O''Brien'"`;
+
+exports[`filter predicate parity — thinkingdata > range_calendar (closed range) 1`] = `"event_date >= DATE '2020-01-01' AND event_date <= DATE '2020-01-31'"`;
+
+exports[`filter predicate parity — thinkingdata > repeat (scalar) 1`] = `"category='O''Brien'"`;
+
+exports[`filter predicate parity — thinkingdata > slider (range and single) 1`] = `
+{
+  "range": "amount BETWEEN 10 AND 20",
+  "single": "amount >= 5",
+}
+`;
+
+exports[`filter predicate parity — thinkingdata > table_filter (multi-column compound state) 1`] = `"(status IN ('active', 'pending') AND name IN ('O''Brien'))"`;

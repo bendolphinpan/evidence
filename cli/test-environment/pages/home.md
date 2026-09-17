@@ -13,6 +13,10 @@ Explore comprehensive global health data from the World Bank (1960-2020):
 - **[World Health Overview](/world-health-overview)** - Global health metrics with regional comparisons
 - **[Maternal & Child Health Deep Dive](/maternal-child-health)** - In-depth analysis of maternal mortality, child survival, and healthcare access
 
+### ThinkingData connector smoke
+
+- **[Ping](/thinkingdata)** — `SELECT 1` against OpenAPI if `connection.yaml` is set. Game reports live in Self-Data `evidence/`, not here.
+
 ### Demo Data
 
 - **[Order Analysis](/order-analysis)** - Retail order analysis with channels and products

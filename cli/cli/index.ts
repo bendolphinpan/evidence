@@ -16,7 +16,7 @@ import {
 	generateToken
 } from './auth.ts';
 import { runQuery, executeQuery } from './query.ts';
-import { loadConnectionConfig, listTablesSql, qualifyTableName } from './connection/index.ts';
+import { loadConnectionConfig, listTablesSql, describeTableSql } from './connection/index.ts';
 import { managedColumnsSql, NO_QUERY_CACHE } from '@evidence/core/metadata/managed-catalog';
 import { printResult, fail, EXIT_USAGE } from './output.ts';
 import { listConnectors } from './connectors.ts';
@@ -217,9 +217,7 @@ try {
 			}
 			try {
 				const cfg = await loadConnectionConfig(process.cwd());
-				const result = await executeQuery(
-					`SELECT * FROM ${qualifyTableName(args.tableName, cfg)} LIMIT 1`
-				);
+				const result = await executeQuery(describeTableSql(args.tableName, cfg));
 				// null = source didn't report nullability (e.g. proxied engine types).
 				const rows = result.columns.map((c) => ({
 					name: c.name,
@@ -247,9 +245,7 @@ try {
 
 				// --table narrows to a single table's column list (like describe).
 				if (args.schemaTable) {
-					const result = await executeQuery(
-						`SELECT * FROM ${qualifyTableName(args.schemaTable, cfg)} LIMIT 1`
-					);
+					const result = await executeQuery(describeTableSql(args.schemaTable, cfg));
 					const rows = result.columns.map((c) => ({ name: c.name, type: c.type || 'unknown' }));
 					printResult(
 						{ kind: 'rows', columns: [{ name: 'name' }, { name: 'type' }], rows },
@@ -280,9 +276,7 @@ try {
 						const schema = (r.schema_name ?? r.table_schema ?? null) as string | null;
 						let columns = 0;
 						try {
-							const colResult = await executeQuery(
-								`SELECT * FROM ${qualifyTableName(table, cfg, schema)} LIMIT 1`
-							);
+							const colResult = await executeQuery(describeTableSql(table, cfg, schema));
 							columns = colResult.columns.length;
 						} catch {
 							columns = 0;

@@ -28,7 +28,8 @@ const WAREHOUSES: WarehouseType[] = [
 	'databricks',
 	'postgres',
 	'cube',
-	'motherduck'
+	'motherduck',
+	'thinkingdata'
 ];
 
 function deps(dialect: SqlDialect) {

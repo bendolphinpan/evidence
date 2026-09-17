@@ -3,7 +3,6 @@
  * dev-mode server (server.dev.ts).
  */
 
-import { exec } from 'child_process';
 
 const STUDIO_HOST = process.env.PUBLIC_STUDIO_HOST || 'https://evidence.studio';
 
@@ -41,18 +40,24 @@ export async function ensureStudioServerOrExit(): Promise<void> {
 }
 
 export function openBrowser(url: string): void {
+	const { spawn } = require('child_process') as typeof import('node:child_process');
 	const platform = process.platform;
 
-	let command: string;
-	if (platform === 'darwin') {
-		command = `open "${url}"`;
-	} else if (platform === 'win32') {
-		command = `start "${url}"`;
-	} else {
-		command = `xdg-open "${url}"`;
-	}
+	// Windows `start "quoted"` treats the first quoted arg as the window title,
+	// so `start "http://localhost:3000"` opens a blank window. Match auth.ts:
+	// `cmd /c start "" <url>`.
+	const [cmd, args]: [string, string[]] =
+		platform === 'darwin'
+			? ['open', [url]]
+			: platform === 'win32'
+				? ['cmd', ['/c', 'start', '', url]]
+				: ['xdg-open', [url]];
 
-	exec(command, () => {
-		// Silently fail if browser can't open
-	});
+	try {
+		const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+		child.on('error', () => {});
+		child.unref();
+	} catch {
+		// best-effort; the user can open the URL manually
+	}
 }

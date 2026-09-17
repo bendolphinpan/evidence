@@ -297,6 +297,17 @@ describe('runInit', () => {
 
 			expect(await exists(path.join(workDir, 'wh-project', 'connection.yaml'))).toBe(true);
 		});
+
+		it('scaffolds a thinkingdata connection.yaml whose unfilled placeholders are rejected', async () => {
+			const result = await runInit({ targetDir: null, cwd: workDir, warehouse: 'thinkingdata' });
+
+			expect(result.warehouse).toBe('thinkingdata');
+			const raw = await readFile(path.join(workDir, 'connection.yaml'), 'utf-8');
+			const parsed = yaml.load(raw) as Record<string, unknown>;
+			expect(parsed.type).toBe('thinkingdata');
+			expect(parsed.project_id).toBeDefined();
+			await expect(loadConnectionConfig(workDir)).rejects.toThrow('unfilled <placeholder>');
+		});
 	});
 
 	describe('YAML safety for project name', () => {

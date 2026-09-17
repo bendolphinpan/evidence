@@ -20,7 +20,8 @@ export const INIT_WAREHOUSES = [
 	'databricks',
 	'postgres',
 	'cube',
-	'motherduck'
+	'motherduck',
+	'thinkingdata'
 ] as const;
 
 export type InitWarehouse = (typeof INIT_WAREHOUSES)[number];
@@ -132,6 +133,17 @@ token: "<token>" # MotherDuck service/access token (MotherDuck UI: Settings -> A
 # schemas: ["<schema>"] # allowlist of schemas exposed to the schema browser, optional
 `;
 
+const THINKINGDATA_TEMPLATE = `# ThinkingData (数数) OpenAPI direct connector. Queries run live against /querySql.
+type: thinkingdata
+url: "<url>" # OpenAPI root from the console, not the game SDK receiver. Cloud: https://your-company.thinkingdata.cn  Private: http://host:8992
+token: "<token>" # project query token
+project_id: "<project_id>" # numeric project id (not AppId), e.g. 51 → ta.v_event_51
+schema: ta
+# Prefer env interpolation so the token stays out of git:
+# url: \${TE_OPENAPI_URL}
+# token: \${TE_OPENAPI_TOKEN}
+`;
+
 const TEMPLATES: Record<InitWarehouse, string> = {
 	snowflake: SNOWFLAKE_TEMPLATE,
 	bigquery: BIGQUERY_TEMPLATE,
@@ -140,7 +152,8 @@ const TEMPLATES: Record<InitWarehouse, string> = {
 	databricks: DATABRICKS_TEMPLATE,
 	postgres: POSTGRES_TEMPLATE,
 	cube: CUBE_TEMPLATE,
-	motherduck: MOTHERDUCK_TEMPLATE
+	motherduck: MOTHERDUCK_TEMPLATE,
+	thinkingdata: THINKINGDATA_TEMPLATE
 };
 
 /** Returns the connection.yaml scaffold for a supported warehouse type. */

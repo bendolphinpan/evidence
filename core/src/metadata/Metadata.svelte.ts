@@ -233,7 +233,8 @@ export class Metadata {
 				this.#warehouseMode === 'databricks' ||
 				this.#warehouseMode === 'postgres' ||
 				this.#warehouseMode === 'cube' ||
-				this.#warehouseMode === 'motherduck')
+				this.#warehouseMode === 'motherduck' ||
+				this.#warehouseMode === 'thinkingdata')
 		) {
 			this.#loading = false;
 			return;
@@ -269,6 +270,10 @@ export class Metadata {
 
 		if (this.#warehouseMode === 'motherduck') {
 			return this.#loadMotherduck();
+		}
+
+		if (this.#warehouseMode === 'thinkingdata') {
+			return this.#loadThinkingData();
 		}
 
 		try {
@@ -714,6 +719,43 @@ ${schemaFilter}`
 		} catch (e) {
 			logger.error(e, 'Failed to fetch MotherDuck metadata');
 			throw new Error('Failed to fetch MotherDuck metadata', { cause: e });
+		} finally {
+			this.#loading = false;
+		}
+	}
+
+	async #loadThinkingData(): Promise<void> {
+		try {
+			const tablesResult = await this.#catalogQuery<{ name: string; schema_name?: string }>(
+				'SHOW TABLES'
+			);
+
+			if (tablesResult.error) {
+				logger.error({ tablesResult }, 'Failed to fetch ThinkingData metadata');
+				throw new Error(`Failed to fetch ThinkingData metadata: ${tablesResult.error}`);
+			}
+
+			for (const row of tablesResult.rows) {
+				const schema = row.schema_name || 'ta';
+				const qualified = row.name.includes('.') ? row.name : `${schema}.${row.name}`;
+				// Do not SELECT * against OpenAPI to learn columns — a 7-day event
+				// probe can take tens of seconds and freezes every page. Table names
+				// come from project_id; column types are inferred when a real query runs.
+				this.#tables.set(
+					qualified,
+					new TableMetadata(
+						{
+							name: qualified,
+							columns: {},
+							tableType: 'table'
+						},
+						this.#tableOpts
+					)
+				);
+			}
+		} catch (e) {
+			logger.error(e, 'Failed to fetch ThinkingData metadata');
+			throw new Error('Failed to fetch ThinkingData metadata', { cause: e });
 		} finally {
 			this.#loading = false;
 		}

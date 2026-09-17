@@ -23,7 +23,8 @@ const WAREHOUSES: WarehouseType[] = [
 	'databricks',
 	'postgres',
 	'cube',
-	'motherduck'
+	'motherduck',
+	'thinkingdata'
 ];
 
 const COLUMN = 'company';

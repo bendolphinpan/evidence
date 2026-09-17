@@ -1,0 +1,6 @@
+# Copy to connection.yaml (gitignored). Token stays in .env as TE_OPENAPI_TOKEN.
+type: thinkingdata
+url: ${TE_OPENAPI_URL}
+token: ${TE_OPENAPI_TOKEN}
+project_id: "51"
+schema: ta

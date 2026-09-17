@@ -16,6 +16,8 @@ exports[`applyAggregateFilter — postgres > distributes a predicate across a co
 
 exports[`applyAggregateFilter — snowflake > distributes a predicate across a compound measure 1`] = `"sum(CASE WHEN order_date >= '2024-01-01' THEN sales END) / nullif(sum(CASE WHEN order_date >= '2024-01-01' THEN quantity END), 0)"`;
 
+exports[`applyAggregateFilter — thinkingdata > distributes a predicate across a compound measure 1`] = `"sum(sales) FILTER (WHERE order_date >= '2024-01-01') / nullif(sum(quantity) FILTER (WHERE order_date >= '2024-01-01'), 0)"`;
+
 exports[`generateSQLQuery with filters — bigquery > routes column-bound filter predicates into the WHERE clause 1`] = `
 "SELECT category AS \`category\`, sum(sales) AS \`sum_sales\`
  FROM orders
@@ -94,6 +96,16 @@ exports[`generateSQLQuery with filters — snowflake > routes column-bound filte
 		
 		
 		ORDER BY category desc LIMIT 100"
+`;
+
+exports[`generateSQLQuery with filters — thinkingdata > routes column-bound filter predicates into the WHERE clause 1`] = `
+"SELECT category AS "category", sum(sales) AS "sum_sales"
+ FROM orders
+ WHERE (category='O''Brien' AND region IN ('East', 'West'))
+ GROUP BY category
+ 
+ 
+ ORDER BY category desc LIMIT 100"
 `;
 
 exports[`generateSQLQuery — bigquery > date-grain dimension 1`] = `
@@ -453,4 +465,50 @@ exports[`generateSQLQuery — snowflake > week-grain dimension 1`] = `
  FROM orders
  
  GROUP BY ALL"
+`;
+
+exports[`generateSQLQuery — thinkingdata > date-grain dimension 1`] = `
+"SELECT category AS "category", DATE_TRUNC('month', order_date) AS "order_date__month", sum(sales) AS "sum_sales"
+ FROM orders
+ 
+ GROUP BY category, DATE_TRUNC('month', order_date)"
+`;
+
+exports[`generateSQLQuery — thinkingdata > grouped chart 1`] = `
+"SELECT category AS "category", sum(sales) AS "sum_sales"
+ FROM orders
+ 
+ GROUP BY category
+ 
+ 
+ ORDER BY category desc LIMIT 100"
+`;
+
+exports[`generateSQLQuery — thinkingdata > search + pagination 1`] = `
+"SELECT * FROM (SELECT category AS "category", sum(sales) AS "sum_sales"
+ FROM orders
+ 
+ GROUP BY category
+ 
+ 
+ 
+ LIMIT 2000) AS evidence_paged WHERE (CAST("category" AS TEXT) ILIKE '%abc%' OR CAST("sum_sales" AS TEXT) ILIKE '%abc%') LIMIT 10 OFFSET 20"
+`;
+
+exports[`generateSQLQuery — thinkingdata > subtotals table 1`] = `
+"SELECT category AS "category", region AS "region", sum(sales) AS "sum_sales", GROUPING(category) AS "__ev_grouping_category", GROUPING(region) AS "__ev_grouping_region", CASE WHEN GROUPING(category) + GROUPING(region) = 2 AND 0 = 0 THEN 0 WHEN GROUPING(category) = 0 AND GROUPING(region) = 1 THEN 1 WHEN GROUPING(category) = 1 AND GROUPING(region) = 1 THEN 0 ELSE NULL END AS "__ev_subtotal_level", CASE
+ WHEN (CASE WHEN GROUPING(category) + GROUPING(region) = 2 AND 0 = 0 THEN 0 WHEN GROUPING(category) = 0 AND GROUPING(region) = 1 THEN 1 WHEN GROUPING(category) = 1 AND GROUPING(region) = 1 THEN 0 ELSE NULL END) IS NULL THEN 'cell_data'
+ WHEN (CASE WHEN GROUPING(category) + GROUPING(region) = 2 AND 0 = 0 THEN 0 WHEN GROUPING(category) = 0 AND GROUPING(region) = 1 THEN 1 WHEN GROUPING(category) = 1 AND GROUPING(region) = 1 THEN 0 ELSE NULL END) = 0 THEN 'row_total'
+ ELSE 'row_subtotal'
+ END AS "__ev_render_type"
+ FROM orders
+ 
+ GROUP BY GROUPING SETS ((category, region), (category), ())"
+`;
+
+exports[`generateSQLQuery — thinkingdata > week-grain dimension 1`] = `
+"SELECT (DATE_TRUNC('week', order_date + INTERVAL '1 day') - INTERVAL '1 day') AS "order_date__week", sum(sales) AS "sum_sales"
+ FROM orders
+ 
+ GROUP BY (DATE_TRUNC('week', order_date + INTERVAL '1 day') - INTERVAL '1 day')"
 `;

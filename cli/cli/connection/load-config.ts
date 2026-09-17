@@ -21,7 +21,8 @@ import {
 	postgresConnectionSchema,
 	cubeConnectionSchema,
 	motherduckConnectionSchema,
-	snowflakeConnectionSchema
+	snowflakeConnectionSchema,
+	thinkingdataConnectionSchema
 } from '@evidence/core/connectors/connection-schema';
 import { resolveSnowflakeCredentials } from '@evidence/core/connectors/snowflake/resolve';
 import { resolveBigQueryCredentials } from '@evidence/core/connectors/bigquery/resolve';
@@ -31,9 +32,40 @@ import { resolveDatabricksCredentials } from '@evidence/core/connectors/databric
 import { resolvePostgresCredentials } from '@evidence/core/connectors/postgres/resolve';
 import { resolveCubeCredentials } from '@evidence/core/connectors/cube/resolve';
 import { resolveMotherduckCredentials } from '@evidence/core/connectors/motherduck/resolve';
+import { resolveThinkingDataCredentials } from '@evidence/core/connectors/thinkingdata/resolve';
 import type { ConnectionConfig } from './types';
 
 const CONFIG_FILENAME = 'connection.yaml';
+const DOTENV_FILENAME = '.env';
+
+/** KEY=value lines from the project `.env`. Does not override variables already in process.env. */
+async function loadProjectDotEnv(cwd: string): Promise<void> {
+	let raw: string;
+	try {
+		raw = await readFile(path.join(cwd, DOTENV_FILENAME), 'utf-8');
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === 'ENOENT') return;
+		throw new Error(`Failed to read ${DOTENV_FILENAME}: ${(e as Error).message}`);
+	}
+
+	for (const line of raw.split(/\r?\n/)) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith('#')) continue;
+		const eq = trimmed.indexOf('=');
+		if (eq <= 0) continue;
+		const key = trimmed.slice(0, eq).trim();
+		if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) continue;
+		if (process.env[key] !== undefined) continue;
+		let value = trimmed.slice(eq + 1).trim();
+		if (
+			(value.startsWith('"') && value.endsWith('"')) ||
+			(value.startsWith("'") && value.endsWith("'"))
+		) {
+			value = value.slice(1, -1);
+		}
+		process.env[key] = value;
+	}
+}
 
 // `${VAR}` in connection.yaml resolves from the process environment — secrets
 // can live in the platform's env/secret store instead of the gitignored file.
@@ -74,6 +106,8 @@ export async function loadConnectionConfig(cwd: string): Promise<ConnectionConfi
 		if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
 		throw new Error(`Failed to read ${CONFIG_FILENAME}: ${(e as Error).message}`);
 	}
+
+	await loadProjectDotEnv(cwd);
 
 	let parsed: unknown;
 	try {
@@ -165,6 +199,12 @@ export async function loadConnectionConfig(cwd: string): Promise<ConnectionConfi
 		const data = parseOrThrow(motherduckConnectionSchema, obj);
 		const credentials = await resolveMotherduckCredentials(data, { cwd });
 		return { type: 'motherduck', ...credentials };
+	}
+
+	if (obj.type === 'thinkingdata') {
+		const data = parseOrThrow(thinkingdataConnectionSchema, obj);
+		const credentials = resolveThinkingDataCredentials(data);
+		return { type: 'thinkingdata', ...credentials };
 	}
 
 	throw new Error(

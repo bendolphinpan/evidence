@@ -8,6 +8,7 @@ import {
 	PostgresDialect,
 	CubeDialect,
 	MotherDuckDialect,
+	ThinkingDataDialect,
 	defaultDialect
 } from './sql-dialect';
 import type { SqlDialect } from './sql-dialect';
@@ -1235,6 +1236,27 @@ describe('MotherDuckDialect', () => {
 		it('quotes identifiers with spaces', () => {
 			expect(dialect.quoteIdentifierIfNeeded('Total Sales')).toBe('"Total Sales"');
 		});
+	});
+});
+
+describe('ThinkingDataDialect', () => {
+	const dialect = new ThinkingDataDialect();
+
+	it('has name "thinkingdata"', () => {
+		expect(dialect.name).toBe('thinkingdata');
+	});
+
+	it('emits Trino date_add for dateAdd / dateSub', () => {
+		expect(dialect.dateAdd('day', -6, '"$part_date"')).toBe(
+			`date_add('day', -6, "$part_date")`
+		);
+		expect(dialect.dateSub('day', 7, 'created_at')).toBe(`date_add('day', -7, created_at)`);
+	});
+
+	it('double-quotes # / $ identifiers', () => {
+		expect(dialect.quoteIdentifierIfNeeded('$part_date')).toBe('"$part_date"');
+		expect(dialect.quoteIdentifierIfNeeded('#user_id')).toBe('"#user_id"');
+		expect(dialect.quoteIdentifierIfNeeded('event_name')).toBe('event_name');
 	});
 });
 

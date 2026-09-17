@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { listTablesSql, qualifyTableName } from './index';
+import { listTablesSql, qualifyTableName, describeTableSql } from './index';
 import type {
 	ClickHouseConnectionConfig,
 	FabricConnectionConfig,
-	DatabricksConnectionConfig
+	DatabricksConnectionConfig,
+	ThinkingDataConnectionConfig
 } from './types';
 
 const ch = (databases: string[]): ClickHouseConnectionConfig => ({
@@ -130,5 +131,48 @@ describe('qualifyTableName (databricks)', () => {
 
 	it('leaves an already-qualified name unchanged', () => {
 		expect(qualifyTableName('sales.orders', databricks({ schema: 'sales' }))).toBe('sales.orders');
+	});
+});
+
+const te = (extra: Partial<ThinkingDataConnectionConfig> = {}): ThinkingDataConnectionConfig => ({
+	type: 'thinkingdata',
+	url: 'https://company.thinkingdata.cn',
+	token: 'tok',
+	projectId: '51',
+	schema: 'ta',
+	...extra
+});
+
+describe('listTablesSql (thinkingdata)', () => {
+	it('returns SHOW TABLES (executor serves the local catalog)', () => {
+		expect(listTablesSql(te())).toBe('SHOW TABLES');
+	});
+
+	it('requires project_id', () => {
+		expect(() => listTablesSql(te({ projectId: '' }))).toThrow(/project_id/);
+	});
+});
+
+describe('qualifyTableName (thinkingdata)', () => {
+	it('prefixes the configured schema', () => {
+		expect(qualifyTableName('v_event_51', te())).toBe('ta.v_event_51');
+	});
+
+	it('leaves an already-qualified name unchanged', () => {
+		expect(qualifyTableName('ta.v_user_51', te())).toBe('ta.v_user_51');
+	});
+});
+
+describe('describeTableSql (thinkingdata)', () => {
+	it('adds a $part_date window for event tables', () => {
+		const sql = describeTableSql('v_event_51', te());
+		expect(sql).toContain('ta.v_event_51');
+		expect(sql).toContain('"$part_date"');
+		expect(sql).toMatch(/LIMIT 1\s*$/);
+	});
+
+	it('does not add $part_date for user tables', () => {
+		const sql = describeTableSql('v_user_51', te());
+		expect(sql).toBe('SELECT * FROM ta.v_user_51 LIMIT 1');
 	});
 });

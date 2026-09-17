@@ -25,7 +25,8 @@ const WAREHOUSES: WarehouseType[] = [
 	'databricks',
 	'postgres',
 	'cube',
-	'motherduck'
+	'motherduck',
+	'thinkingdata'
 ];
 
 /** A grouped chart: one dimension + one measure, ordered and limited. */

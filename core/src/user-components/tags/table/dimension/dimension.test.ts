@@ -44,7 +44,8 @@ const WAREHOUSES: WarehouseType[] = [
 	'databricks',
 	'postgres',
 	'cube',
-	'motherduck'
+	'motherduck',
+	'thinkingdata'
 ];
 
 describe('dimension conditional colors', () => {

@@ -11,7 +11,9 @@ import { executeFabricQuery } from './fabric';
 import { executeDatabricksQuery } from './databricks';
 import { executePostgresQuery } from './postgres';
 import { executeMotherduckQuery } from './motherduck';
+import { executeThinkingDataQuery } from './thinkingdata';
 import { managedTableNamesSql } from '@evidence/core/metadata/managed-catalog';
+import { tableProbeSql, teQualifiedTables } from '@evidence/core/connectors/thinkingdata/sql';
 import type { ConnectionConfig, QueryResult } from './types';
 
 export type { ConnectionConfig, QueryResult, QueryColumn } from './types';
@@ -36,6 +38,8 @@ export async function executeQuery(sql: string, config: ConnectionConfig): Promi
 			return executePostgresQuery(sql, config);
 		case 'motherduck':
 			return executeMotherduckQuery(sql, config);
+		case 'thinkingdata':
+			return executeThinkingDataQuery(sql, config);
 		default:
 			// Belt-and-braces: a future ConnectionConfig variant added without a
 			// matching branch should fail loudly here rather than silently
@@ -143,6 +147,17 @@ export function listTablesSql(config: ConnectionConfig | null): string {
 			}
 			return `${base} WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY name`;
 		}
+		case 'thinkingdata': {
+			const tables = teQualifiedTables(config.schema, config.projectId);
+			if (!tables.all.length) {
+				throw new Error(
+					'ThinkingData connection.yaml is missing project_id — required to list ta.v_event_{id} tables.'
+				);
+			}
+			// OpenAPI has no SHOW TABLES. Local catalog of the three project tables;
+			// executeThinkingDataQuery intercepts SHOW TABLES and returns these names.
+			return 'SHOW TABLES';
+		}
 	}
 }
 
@@ -193,5 +208,23 @@ export function qualifyTableName(
 		if (config.schema) return `"${config.schema}"."${name}"`;
 		return name;
 	}
+	if (config.type === 'thinkingdata') {
+		if (name.includes('.')) return name;
+		const ns = config.schema || 'ta';
+		return `${ns}.${name}`;
+	}
 	return name;
+}
+
+/** `SELECT * … LIMIT 1` probe used by describe/schema. Event tables need $part_date. */
+export function describeTableSql(
+	name: string,
+	config: ConnectionConfig | null,
+	schema?: string | null
+): string {
+	const qualified = qualifyTableName(name, config, schema);
+	if (config?.type === 'thinkingdata') {
+		return tableProbeSql(qualified);
+	}
+	return `SELECT * FROM ${qualified} LIMIT 1`;
 }

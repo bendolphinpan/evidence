@@ -1,2 +1,5 @@
 connection.yaml
 *.connection.yaml
+.env
+.env.*
+!.env.example

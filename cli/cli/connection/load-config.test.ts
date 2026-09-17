@@ -285,4 +285,38 @@ describe('loadConnectionConfig', () => {
 			}
 		});
 	});
+
+	describe('thinkingdata', () => {
+		it('reads ${TE_OPENAPI_TOKEN} from a project .env when process.env is unset', async () => {
+			delete process.env.TE_OPENAPI_TOKEN;
+			await writeFile(path.join(workDir, '.env'), 'TE_OPENAPI_TOKEN=from-dotenv\n');
+			await writeYaml(
+				`type: thinkingdata\nurl: https://company.thinkingdata.cn\ntoken: \${TE_OPENAPI_TOKEN}\nproject_id: "51"\n`
+			);
+			const cfg = await loadConnectionConfig(workDir);
+			expect(cfg).toMatchObject({ type: 'thinkingdata', token: 'from-dotenv', projectId: '51' });
+			delete process.env.TE_OPENAPI_TOKEN;
+		});
+
+		it('parses yaml and interpolates OpenAPI env vars', async () => {
+			process.env.TE_OPENAPI_URL = 'https://company.thinkingdata.cn/querySql';
+			process.env.TE_OPENAPI_TOKEN = 'te-secret';
+			try {
+				await writeYaml(
+					`type: thinkingdata\nurl: \${TE_OPENAPI_URL}\ntoken: \${TE_OPENAPI_TOKEN}\nproject_id: "51"\nschema: ta\n`
+				);
+				const cfg = await loadConnectionConfig(workDir);
+				expect(cfg).toMatchObject({
+					type: 'thinkingdata',
+					url: 'https://company.thinkingdata.cn',
+					token: 'te-secret',
+					projectId: '51',
+					schema: 'ta'
+				});
+			} finally {
+				delete process.env.TE_OPENAPI_URL;
+				delete process.env.TE_OPENAPI_TOKEN;
+			}
+		});
+	});
 });

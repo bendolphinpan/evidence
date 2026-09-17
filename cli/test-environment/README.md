@@ -4,7 +4,7 @@ This directory is the local Evidence project the CLI is exercised against during
 
 ## Setup
 
-Create `cli/test-environment/connection.yaml`. Snowflake + dbt source files for this directory will be added in follow-up work — for now a minimal config is enough to exercise CLI commands.
+ThinkingData connector smoke: copy `.env.example` → `.env` and `connection.yaml.example` → `connection.yaml`. Game reports are in Self-Data `evidence/`, not this folder.
 
 ## Run from the monorepo root
 
