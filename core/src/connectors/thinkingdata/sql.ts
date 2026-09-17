@@ -132,6 +132,84 @@ export function rewriteTeIdentifiers(sql: string): string {
 	});
 }
 
+function extractParen(sql: string, openIdx: number): { inner: string; end: number } | null {
+  if (sql[openIdx] !== '(') return null;
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = openIdx; i < sql.length; i++) {
+    const c = sql[i];
+    if (inSingle) {
+      if (c === "'" && sql[i + 1] === "'") {
+        i++;
+        continue;
+      }
+      if (c === "'") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      if (c === '"' && sql[i + 1] === '"') {
+        i++;
+        continue;
+      }
+      if (c === '"') inDouble = false;
+      continue;
+    }
+    if (c === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (c === '"') {
+      inDouble = true;
+      continue;
+    }
+    if (c === '(') depth++;
+    if (c === ')') {
+      depth--;
+      if (depth === 0) return { inner: sql.slice(openIdx + 1, i), end: i };
+    }
+  }
+  return null;
+}
+
+export function interpolateTeDatePlaceholders(sql: string): string {
+  if (!/\{\{\s*dates\.between\s*\}\}/.test(sql)) return sql;
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 6);
+  const iso = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  return sql.replace(/\{\{\s*dates\.between\s*\}\}/g, `BETWEEN '${iso(start)}' AND '${iso(end)}'`);
+}
+
+export function sanitizeTeSql(sql: string): string {
+  return interpolateTeDatePlaceholders(sql)
+    .replace(/\bILIKE\b/gi, 'LIKE')
+    .replace(/\bformatDateTime\s*\(/gi, 'CAST(')
+    .replace(/,\s*'%b %e\/%y'\s*\)/gi, ' AS varchar)');
+}
+
+export function unwrapEvidenceSubquery(sql: string): string {
+  let s = sql.trim().replace(/;+$/, '');
+  for (let n = 0; n < 6; n++) {
+    const head = s.match(/^SELECT\s+(?:\*|COUNT\s*\(\s*\*\s*\)\s+AS\s+"?total_count"?)\s+FROM\s+\(/i);
+    if (!head) break;
+    const extracted = extractParen(s, head[0].length - 1);
+    if (!extracted) break;
+    const inner = extracted.inner.trim();
+    if (!/^\s*(WITH|SELECT)\b/i.test(inner)) break;
+    const rest = s.slice(extracted.end + 1);
+    const limitMatch = rest.match(/LIMIT\s+(\d+)/i);
+    s = inner;
+    if (limitMatch && !/\bLIMIT\s+\d+\s*$/i.test(s)) s += `\nLIMIT ${limitMatch[1]}`;
+  }
+  return s;
+}
+
 export function assertReadOnlySql(sql: string): string {
 	const clean = sql.trim().replace(/;+\s*$/, '');
 	if (!clean) {

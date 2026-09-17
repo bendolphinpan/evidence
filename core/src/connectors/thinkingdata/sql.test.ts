@@ -6,7 +6,9 @@ import {
 	isShowTablesSql,
 	normalizeTeBaseUrl,
 	rewriteTeIdentifiers,
-	teQualifiedTables
+	teQualifiedTables,
+	sanitizeTeSql,
+	unwrapEvidenceSubquery
 } from './sql';
 import { resolveThinkingDataCredentials } from './resolve';
 
@@ -95,6 +97,41 @@ describe('isShowTablesSql', () => {
 		expect(isShowTablesSql('SHOW TABLES')).toBe(true);
 		expect(isShowTablesSql('show tables;')).toBe(true);
 		expect(isShowTablesSql('SELECT 1')).toBe(false);
+	});
+});
+
+describe('unwrapEvidenceSubquery', () => {
+	it('unwraps SELECT * FROM (WITH ...) AS __ev_limit_wrap LIMIT n', () => {
+		const inner = 'WITH ev AS (SELECT 1 AS ok) SELECT * FROM ev';
+		const wrapped = `SELECT * FROM (${inner}\n) AS __ev_limit_wrap LIMIT 1000`;
+		expect(unwrapEvidenceSubquery(wrapped)).toBe(`${inner}\nLIMIT 1000`);
+	});
+
+	it('unwraps evidence_paged wrap without relying on alias name', () => {
+		const inner = 'WITH ev AS (SELECT try_cast(level AS integer) AS level FROM t) SELECT * FROM ev';
+		const wrapped = `SELECT * FROM (${inner}) AS evidence_paged WHERE 1=1 LIMIT 10 OFFSET 0`;
+		expect(unwrapEvidenceSubquery(wrapped).startsWith('WITH ev AS')).toBe(true);
+	});
+
+	it('unwraps SELECT * FROM (SELECT ...) table wrappers', () => {
+		const inner = `SELECT series_type, level FROM (SELECT 'interval' AS series_type) result`;
+		const wrapped = `SELECT * FROM (${inner}) AS evidence_paged WHERE (lower(CAST("series_type" AS varchar)) LIKE lower('%')) LIMIT 10`;
+		expect(unwrapEvidenceSubquery(wrapped)).toBe(`${inner}\nLIMIT 10`);
+	});
+
+	it('leaves plain SELECT unchanged', () => {
+		expect(unwrapEvidenceSubquery('SELECT 1 AS ok')).toBe('SELECT 1 AS ok');
+	});
+});
+
+describe('sanitizeTeSql', () => {
+	it('rewrites ILIKE to LIKE', () => {
+		expect(sanitizeTeSql("WHERE 'x' ILIKE '%'")).toBe("WHERE 'x' LIKE '%'");
+	});
+
+	it('fills leftover {{dates.between}} placeholders', () => {
+		const out = sanitizeTeSql('WHERE "$part_date" {{dates.between}}');
+		expect(out).toMatch(/WHERE "\$part_date" BETWEEN '\d{4}-\d{2}-\d{2}' AND '\d{4}-\d{2}-\d{2}'/);
 	});
 });
 

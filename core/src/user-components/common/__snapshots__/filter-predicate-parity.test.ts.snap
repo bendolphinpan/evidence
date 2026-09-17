@@ -329,7 +329,7 @@ exports[`filter predicate parity — thinkingdata > external (scalar and list) 1
 
 exports[`filter predicate parity — thinkingdata > input_tabs (scalar) 1`] = `"status='O''Brien'"`;
 
-exports[`filter predicate parity — thinkingdata > range_calendar (closed range) 1`] = `"event_date >= DATE '2020-01-01' AND event_date <= DATE '2020-01-31'"`;
+exports[`filter predicate parity — thinkingdata > range_calendar (closed range) 1`] = `"event_date >= '2020-01-01' AND event_date <= '2020-01-31'"`;
 
 exports[`filter predicate parity — thinkingdata > repeat (scalar) 1`] = `"category='O''Brien'"`;
 

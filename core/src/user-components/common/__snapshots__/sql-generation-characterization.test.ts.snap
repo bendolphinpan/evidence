@@ -492,7 +492,7 @@ exports[`generateSQLQuery — thinkingdata > search + pagination 1`] = `
  
  
  
- LIMIT 2000) AS evidence_paged WHERE (CAST("category" AS TEXT) ILIKE '%abc%' OR CAST("sum_sales" AS TEXT) ILIKE '%abc%') LIMIT 10 OFFSET 20"
+ LIMIT 2000) AS evidence_paged WHERE (lower(CAST("category" AS varchar)) LIKE lower('%abc%') OR lower(CAST("sum_sales" AS varchar)) LIKE lower('%abc%')) LIMIT 10 OFFSET 20"
 `;
 
 exports[`generateSQLQuery — thinkingdata > subtotals table 1`] = `

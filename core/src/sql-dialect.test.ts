@@ -1258,6 +1258,17 @@ describe('ThinkingDataDialect', () => {
 		expect(dialect.quoteIdentifierIfNeeded('#user_id')).toBe('"#user_id"');
 		expect(dialect.quoteIdentifierIfNeeded('event_name')).toBe('event_name');
 	});
+
+	it('emits varchar date literals for $part_date', () => {
+		expect(dialect.dateLiteral('2026-09-17')).toBe("'2026-09-17'");
+	});
+
+	it('appends LIMIT to WITH queries instead of wrapping them', () => {
+		const sql = dialect.applyRowLimit('WITH ev AS (SELECT 1 AS ok) SELECT * FROM ev', 50);
+		expect(sql.startsWith('WITH ev AS')).toBe(true);
+		expect(sql).toMatch(/LIMIT 50\s*$/);
+		expect(sql).not.toMatch(/SELECT \* FROM \(WITH/i);
+	});
 });
 
 describe('defaultDialect', () => {

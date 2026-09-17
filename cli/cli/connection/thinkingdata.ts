@@ -12,7 +12,9 @@ import {
 	assertReadOnlySql,
 	isShowTablesSql,
 	rewriteTeIdentifiers,
-	teQualifiedTables
+	teQualifiedTables,
+	sanitizeTeSql,
+	unwrapEvidenceSubquery
 } from '@evidence/core/connectors/thinkingdata/sql';
 import type { QueryResult } from './types';
 
@@ -358,8 +360,8 @@ async function queryViaExecuteSql(
 }
 
 function requestStyles(preferred?: TeRequestStyle): TeRequestStyle[] {
-	const all: TeRequestStyle[] = ['form', 'query', 'json'];
-	if (!preferred) return all;
+	const all: TeRequestStyle[] = ['form', 'json'];
+	if (!preferred || preferred === 'query') return all;
 	return [preferred, ...all.filter((s) => s !== preferred)];
 }
 
@@ -426,7 +428,9 @@ export async function executeThinkingDataQuery(
 	sql: string,
 	config: ThinkingDataCredentials
 ): Promise<QueryResult> {
-	const safeSql = rewriteTeIdentifiers(assertReadOnlySql(sql));
+	const safeSql = rewriteTeIdentifiers(
+		assertReadOnlySql(sanitizeTeSql(unwrapEvidenceSubquery(sql)))
+	);
 	if (isShowTablesSql(safeSql)) {
 		if (!config.projectId) {
 			throw new Error('ThinkingData project_id is required to list ta.v_event_{id} tables');
