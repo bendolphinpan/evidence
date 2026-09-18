@@ -7,6 +7,7 @@ import {
 	normalizeTeBaseUrl,
 	rewriteTeIdentifiers,
 	teQualifiedTables,
+	isEvidenceCountSql,
 	sanitizeTeSql,
 	unwrapEvidenceSubquery
 } from './sql';
@@ -121,6 +122,13 @@ describe('unwrapEvidenceSubquery', () => {
 
 	it('leaves plain SELECT unchanged', () => {
 		expect(unwrapEvidenceSubquery('SELECT 1 AS ok')).toBe('SELECT 1 AS ok');
+	});
+
+	it('does not unwrap COUNT(*) total_count into a data SELECT', () => {
+		const inner = 'SELECT 1 AS ok FROM ta.v_event_51 WHERE "$part_date" = \'2026-09-18\'';
+		const countSql = `SELECT COUNT(*) AS "total_count" FROM (${inner})`;
+		expect(isEvidenceCountSql(countSql)).toBe(true);
+		expect(unwrapEvidenceSubquery(countSql)).toBe(countSql);
 	});
 });
 

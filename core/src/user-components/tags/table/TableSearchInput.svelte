@@ -12,7 +12,7 @@
 	const { searchTerm, onSearchChange, onClear, placeholder = 'Search table...' }: Props = $props();
 </script>
 
-<div class="mb-1.5 flex justify-start">
+<div class="flex justify-start">
 	<div class="relative w-80">
 		<Search class="text-muted-foreground absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2" />
 		<input

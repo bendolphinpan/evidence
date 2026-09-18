@@ -13,6 +13,7 @@ import {
 	isShowTablesSql,
 	rewriteTeIdentifiers,
 	teQualifiedTables,
+	isEvidenceCountSql,
 	sanitizeTeSql,
 	unwrapEvidenceSubquery
 } from '@evidence/core/connectors/thinkingdata/sql';
@@ -428,6 +429,12 @@ export async function executeThinkingDataQuery(
 	sql: string,
 	config: ThinkingDataCredentials
 ): Promise<QueryResult> {
+	if (isEvidenceCountSql(sql)) {
+		return {
+			rows: [{ total_count: null }],
+			columns: mapThinkingDataColumns(['total_count'], [{ total_count: null }])
+		};
+	}
 	const safeSql = rewriteTeIdentifiers(
 		assertReadOnlySql(sanitizeTeSql(unwrapEvidenceSubquery(sql)))
 	);

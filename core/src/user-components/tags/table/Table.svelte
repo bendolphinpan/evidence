@@ -25,6 +25,7 @@
 	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import DeltaDisplay from '../delta/DeltaDisplay.svelte';
 	import TableSearchInput from './TableSearchInput.svelte';
+	import TablePageSizeSelect from './TablePageSizeSelect.svelte';
 	import TableFullscreenButton from './TableFullscreenButton.svelte';
 	import TableDownloadButton from './TableDownloadButton.svelte';
 	import TableFullscreenModal from './TableFullscreenModal.svelte';
@@ -1229,7 +1230,7 @@
 		</details>
 	{/if} -->
 
-	{@render searchInput()}
+	{@render tableToolbar()}
 
 	<div bind:this={mainTableContainer}>
 		{@render tableContent()}
@@ -1258,22 +1259,38 @@
 			hasPivots={model.pivots.length > 0}
 			hasSubtotals={model.needsSubtotals}
 		/>
-		{@render searchInput()}
+		{@render tableToolbar()}
 		{@render tableContent()}
 		{@render footer(true)}
 	</TableFullscreenModal>
 {/if}
 
-{#snippet searchInput()}
-	{#if search}
-		<TableSearchInput
-			searchTerm={model.searchTerm}
-			onSearchChange={(value) => (model.searchTerm = value)}
-			onClear={() => {
-				model.searchTerm = '';
-				model.page = 0;
-			}}
-		/>
+{#snippet tableToolbar()}
+	{#if !printing && (hasData || search)}
+		<div class="mb-1.5 flex items-center justify-between gap-3">
+			{#if search}
+				<TableSearchInput
+					searchTerm={model.searchTerm}
+					onSearchChange={(value) => (model.searchTerm = value)}
+					onClear={() => {
+						model.searchTerm = '';
+						model.page = 0;
+					}}
+				/>
+			{:else}
+				<div></div>
+			{/if}
+			{#if hasData}
+				<TablePageSizeSelect
+					pageSize={page_size}
+					disabled={query.loading}
+					onPageSizeChange={(n) => {
+						model.pageSizeOverride = n;
+						model.page = 0;
+					}}
+				/>
+			{/if}
+		</div>
 	{/if}
 {/snippet}
 

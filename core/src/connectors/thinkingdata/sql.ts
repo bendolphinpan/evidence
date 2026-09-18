@@ -193,10 +193,14 @@ export function sanitizeTeSql(sql: string): string {
     .replace(/,\s*'%b %e\/%y'\s*\)/gi, ' AS varchar)');
 }
 
+export function isEvidenceCountSql(sql: string): boolean {
+	return /^\s*SELECT\s+COUNT\s*\(\s*\*\s*\)\s+AS\s+"?total_count"?\s+FROM\s+\(/i.test(sql);
+}
+
 export function unwrapEvidenceSubquery(sql: string): string {
   let s = sql.trim().replace(/;+$/, '');
   for (let n = 0; n < 6; n++) {
-    const head = s.match(/^SELECT\s+(?:\*|COUNT\s*\(\s*\*\s*\)\s+AS\s+"?total_count"?)\s+FROM\s+\(/i);
+    const head = s.match(/^SELECT\s+\*\s+FROM\s+\(/i);
     if (!head) break;
     const extracted = extractParen(s, head[0].length - 1);
     if (!extracted) break;

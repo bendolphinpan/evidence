@@ -192,7 +192,7 @@ const attributes = {
 	search: {
 		type: Boolean,
 		required: false,
-		default: false,
+		default: true,
 		description: 'Whether to display a search box above the table for filtering results',
 		affectsQuery: false
 	},
