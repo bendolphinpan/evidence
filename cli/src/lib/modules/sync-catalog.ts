@@ -102,29 +102,42 @@ export async function fetchAndWriteLiveCatalog(): Promise<{
 		source: 'openapi'
 	};
 
-	const root = join(getProjectCwd(), '..');
-	const syncDir = join(root, 'llm_wiki', 'sync');
-	mkdirSync(syncDir, { recursive: true });
-	const snapshot = join(syncDir, 'te_live_snapshot.json');
-	writeFileSync(snapshot, JSON.stringify(catalog, null, 2), 'utf8');
+	const cwd = getProjectCwd();
+	const projectSync = join(cwd, 'projects', projectId, 'wiki', 'sync');
+	const legacySync = join(cwd, '..', 'llm_wiki', 'sync');
+	mkdirSync(projectSync, { recursive: true });
+	mkdirSync(legacySync, { recursive: true });
+	const snapshot = join(projectSync, 'te_live_snapshot.json');
+	const payload = JSON.stringify(catalog, null, 2);
+	writeFileSync(snapshot, payload, 'utf8');
+	writeFileSync(join(legacySync, 'te_live_snapshot.json'), payload, 'utf8');
 
-	const liveMd = join(getProjectCwd(), 'agent', 'context', 'live-catalog.md');
-	mkdirSync(join(getProjectCwd(), 'agent', 'context'), { recursive: true });
 	const lines = [
 		`# 线上数数目录（OpenAPI ${catalog.fetchedAt}）`,
 		'',
+		`projectId: ${projectId}`,
 		`表：\`${catalog.tables.event}\` / \`${catalog.tables.user}\``,
 		'',
 		'## 事件',
 		...catalog.events.slice(0, 200).map((e) => `- \`${e.name}\` ${e.display || ''}`),
 		'',
 		'## 事件属性',
-		...catalog.eventProps.slice(0, 300).map((p) => `- \`${p.name}\` ${p.display || p.type || ''} · ta.v_event_${projectId}`),
+		...catalog.eventProps
+			.slice(0, 300)
+			.map((p) => `- \`${p.name}\` ${p.display || p.type || ''} · ${catalog.tables.event}`),
 		'',
 		'## 用户属性',
-		...catalog.userProps.slice(0, 300).map((p) => `- \`${p.name}\` ${p.display || p.type || ''} · ta.v_user_${projectId} · SQL: u."${p.name}"`)
+		...catalog.userProps
+			.slice(0, 300)
+			.map((p) => `- \`${p.name}\` ${p.display || p.type || ''} · ${catalog.tables.user} · SQL: u."${p.name}"`)
 	];
-	writeFileSync(liveMd, lines.join('\n') + '\n', 'utf8');
+	const liveBody = lines.join('\n') + '\n';
+	const projectLiveMd = join(cwd, 'projects', projectId, 'context', 'live-catalog.md');
+	const legacyLiveMd = join(cwd, 'agent', 'context', 'live-catalog.md');
+	mkdirSync(join(cwd, 'projects', projectId, 'context'), { recursive: true });
+	mkdirSync(join(cwd, 'agent', 'context'), { recursive: true });
+	writeFileSync(projectLiveMd, liveBody, 'utf8');
+	writeFileSync(legacyLiveMd, liveBody, 'utf8');
 
-	return { catalog, paths: { snapshot, liveMd } };
+	return { catalog, paths: { snapshot, liveMd: projectLiveMd } };
 }

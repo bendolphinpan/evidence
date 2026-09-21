@@ -156,7 +156,7 @@
 		<Card.Header class="px-6">
 			<Card.Title class="text-base">线上元数据</Card.Title>
 			<Card.Description>
-				从数数 OpenAPI 拉取事件和列，写入 llm_wiki/sync/te_live_snapshot.json，供 AI wiki_lookup 使用。打点需求 Excel 口径不会被覆盖。
+				从数数 OpenAPI 拉取事件和列，写入 `evidence/projects/{id}/wiki/sync/`（并兼容同步到 `llm_wiki/sync/`），供 AI wiki_lookup 使用。打点需求 Excel 口径不会被覆盖。
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="px-6">

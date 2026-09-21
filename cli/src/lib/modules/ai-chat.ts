@@ -1,12 +1,28 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { getProjectCwd } from '$lib/server/project-cwd';
 import { runQuery } from '$lib/server/run-query';
 import { acquireLock, readPageMarkdown, writePageMarkdown } from './pages';
-import { readStore } from './store';
+import {
+	appendAudit,
+	appendChat,
+	getChat,
+	readStore,
+	searchSqlKb,
+	upsertSqlKb,
+	type ChatTurn
+} from './store';
 import type { PublicUser } from './auth';
 
-type ChatMessage = { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_call_id?: string; tool_calls?: unknown };
+type ChatMessage = {
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content: string;
+	tool_call_id?: string;
+	tool_calls?: unknown;
+};
+
+type SkillMeta = { name: string; description: string; triggers: string[]; body: string; path: string };
 
 function aiConfig() {
 	const stored = readStore().settings.ai;
@@ -46,28 +62,115 @@ function readCapped(path: string, max = 12000): string {
 	return readFileSync(path, 'utf8').slice(0, max);
 }
 
-function loadSkills(): string {
-	const dir = join(getProjectCwd(), 'agent/skills');
-	if (!existsSync(dir)) return '';
-	const parts: string[] = [];
+function firstExisting(...paths: string[]): string | null {
+	for (const p of paths) {
+		if (existsSync(p)) return p;
+	}
+	return null;
+}
+
+/** Page frontmatter projectId → global settings.te.projectId → 51 */
+export function resolveActiveProject(pageMd: string): string {
+	const fm = pageMd.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+	if (fm) {
+		const m = fm[1].match(/^\s*projectId\s*:\s*["']?(\d+)["']?\s*$/m);
+		if (m) return m[1];
+	}
+	const te = readStore().settings.te;
+	return String(te.projectId || process.env.TE_PROJECT_ID || '51').trim() || '51';
+}
+
+function teTables(projectId: string, schema = 'ta') {
+	const ns = schema || 'ta';
+	const id = projectId.replace(/[^\w]/g, '') || '51';
+	return {
+		schema: ns,
+		projectId: id,
+		event: `${ns}.v_event_${id}`,
+		user: `${ns}.v_user_${id}`,
+		serial: `${ns}.user_day_serial_${id}`
+	};
+}
+
+function catalogPath(projectId: string): string {
+	const cwd = getProjectCwd();
+	const hit = firstExisting(
+		join(cwd, 'projects', projectId, 'wiki', 'catalog.json'),
+		join(cwd, '..', 'llm_wiki', 'catalog.json'),
+		join(cwd, '..', 'src', 'lib', 'wiki', 'catalog.json')
+	);
+	if (!hit) {
+		console.warn(`[ai-chat] catalog missing for project ${projectId}`);
+		return join(cwd, 'projects', projectId, 'wiki', 'catalog.json');
+	}
+	if (!hit.includes(`projects${sep}${projectId}`) && !hit.includes(`/projects/${projectId}/`)) {
+		console.warn(`[ai-chat] using legacy catalog path: ${hit}`);
+	}
+	return hit;
+}
+
+function parseSkillFile(path: string): SkillMeta | null {
+	const raw = readCapped(path, 12000);
+	if (!raw || /兼容垫片|权威文件/.test(raw.slice(0, 200))) return null;
+	const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+	const body = fm ? fm[2] : raw;
+	const head = fm ? fm[1] : '';
+	const name = (head.match(/^name:\s*(.+)$/m)?.[1] || '').trim() || path;
+	const description = (head.match(/^description:\s*(.+)$/m)?.[1] || '').trim();
+	const triggersRaw = (head.match(/^triggers:\s*(.+)$/m)?.[1] || '').trim();
+	const triggers = triggersRaw
+		? triggersRaw.split(/[,，]/).map((s) => s.trim().toLowerCase()).filter(Boolean)
+		: [];
+	return { name, description, triggers, body, path };
+}
+
+function listSkillDir(dir: string): SkillMeta[] {
+	if (!existsSync(dir)) return [];
+	const out: SkillMeta[] = [];
 	for (const name of readdirSync(dir)) {
 		const file = join(dir, name, 'SKILL.md');
-		const body = readCapped(file, 3500);
-		if (body) parts.push(body);
+		const meta = parseSkillFile(file);
+		if (meta) out.push(meta);
 	}
-	return parts.join('\n\n---\n\n');
+	return out;
 }
 
-function catalogPath(): string {
+function loadLayeredSkills(projectId: string, slug: string, prompt: string): string {
 	const cwd = getProjectCwd();
-	const a = join(cwd, '..', 'llm_wiki', 'catalog.json');
-	const b = join(cwd, '..', 'src', 'lib', 'wiki', 'catalog.json');
-	if (existsSync(a)) return a;
-	return b;
-}
+	const platform = listSkillDir(join(cwd, 'platform', 'skills'));
+	const project = listSkillDir(join(cwd, 'projects', projectId, 'skills'));
+	// Legacy fallback if platform empty
+	const legacy = platform.length ? [] : listSkillDir(join(cwd, 'agent', 'skills'));
 
-function liveSnapshotPath(): string {
-	return join(getProjectCwd(), '..', 'llm_wiki', 'sync', 'te_live_snapshot.json');
+	const parts: string[] = [];
+	const budget = { platform: 4500, project: 3500, page: 3500 };
+	let usedPlat = 0;
+	for (const s of [...platform, ...legacy]) {
+		const chunk = s.body.slice(0, 3500);
+		if (usedPlat + chunk.length > budget.platform) break;
+		parts.push(`### platform/${s.name}\n${chunk}`);
+		usedPlat += chunk.length;
+	}
+
+	const q = `${slug} ${prompt}`.toLowerCase();
+	let usedProj = 0;
+	for (const s of project) {
+		const pageMatch = slug === s.name || slug.includes(s.name);
+		const triggerHit =
+			pageMatch ||
+			s.triggers.some((t) => t && q.includes(t)) ||
+			q.includes(s.name.toLowerCase());
+		if (!triggerHit && project.length > 1) {
+			console.info(`[ai-chat] skip project skill ${s.name} (no trigger for ${slug})`);
+			continue;
+		}
+		const chunk = s.body.slice(0, pageMatch ? budget.page : 2500);
+		if (usedProj + chunk.length > budget.project + budget.page) break;
+		parts.push(`### project/${projectId}/${s.name}\n${chunk}`);
+		usedProj += chunk.length;
+	}
+
+	return parts.join('\n\n---\n\n');
 }
 
 type PropHit = {
@@ -83,11 +186,16 @@ function matchText(q: string, ...parts: Array<string | undefined>): boolean {
 	return parts.join(' ').toLowerCase().includes(q);
 }
 
-function wikiLookup(query: string): string {
+function wikiLookup(query: string, projectId: string): string {
 	const q = query.trim().toLowerCase();
 	if (!q) return JSON.stringify({ error: 'query 为空' });
+	const tables = teTables(projectId, readStore().settings.te.schema || 'ta');
 	try {
-		const cat = JSON.parse(readFileSync(catalogPath(), 'utf8')) as {
+		const catPath = catalogPath(projectId);
+		if (!existsSync(catPath)) {
+			return JSON.stringify({ error: `wiki catalog 不存在: projects/${projectId}/wiki/catalog.json` });
+		}
+		const cat = JSON.parse(readFileSync(catPath, 'utf8')) as {
 			tables?: Record<string, string>;
 			events?: Array<{ name?: string; display?: string; desc?: string }>;
 			metrics?: Array<{ id?: string; name?: string; 口径?: string; sql?: string }>;
@@ -96,6 +204,8 @@ function wikiLookup(query: string): string {
 			specPublicProps?: Array<{ name?: string; display?: string; desc?: string }>;
 			publicEventProps?: Array<{ name?: string; display?: string; desc?: string }>;
 		};
+		const userTable = cat.tables?.user || tables.user;
+		const eventTable = cat.tables?.event || tables.event;
 		const props: PropHit[] = [];
 		for (const p of cat.userPropsSpec || []) {
 			if (!matchText(q, p.name, p.display, p.desc, '用户')) continue;
@@ -103,19 +213,19 @@ function wikiLookup(query: string): string {
 				name: p.name || '',
 				display: p.display,
 				desc: p.desc,
-				table: 'ta.v_user_51',
+				table: userTable,
 				sql: `u."${p.name}"`,
 				source: '打点需求用户属性'
 			});
 		}
 		for (const p of cat.userPropsTe || []) {
 			if (!matchText(q, p.name, p.display, p.desc)) continue;
-			if (props.some((x) => x.name === p.name && x.table === 'ta.v_user_51')) continue;
+			if (props.some((x) => x.name === p.name && x.table === userTable)) continue;
 			props.push({
 				name: p.name || '',
 				display: p.display,
 				desc: p.desc,
-				table: 'ta.v_user_51',
+				table: userTable,
 				sql: `u."${p.name}"`,
 				source: 'TE 用户表导出'
 			});
@@ -128,7 +238,7 @@ function wikiLookup(query: string): string {
 				name,
 				display: p.display,
 				desc: p.desc,
-				table: 'ta.v_event_51',
+				table: eventTable,
 				sql: quoted,
 				source: '打点需求/TE 事件属性'
 			});
@@ -142,43 +252,58 @@ function wikiLookup(query: string): string {
 			.slice(0, 4)
 			.map((m) => ({ id: m.id, name: m.name, 口径: m.口径, sql: (m.sql || '').slice(0, 600) }));
 		return JSON.stringify({
-			tables: cat.tables,
+			projectId,
+			tables: cat.tables || tables,
 			props: props.slice(0, 15),
 			events,
 			metrics,
-			hint: '用户属性必须 JOIN ta.v_user_51 并用 u."name"。事件属性在 ta.v_event_51。查询别名不是表。'
+			hint: `用户属性必须 JOIN ${userTable} 并用 u."name"。事件属性在 ${eventTable}。查询别名不是表。`
 		});
 	} catch (error) {
 		return JSON.stringify({ error: error instanceof Error ? error.message : 'wiki 读取失败' });
 	}
 }
 
-function systemPrompt(slug: string, pageMd: string): string {
+function systemPrompt(slug: string, pageMd: string, projectId: string, prompt: string): string {
 	const cwd = getProjectCwd();
-	const agents = readCapped(join(cwd, 'AGENTS.md'), 5000);
-	const skills = loadSkills();
-	const tracking = readCapped(join(cwd, 'agent/context/tracking-props.md'), 4000);
-	const liveCat = readCapped(join(cwd, 'agent/context/live-catalog.md'), 3000);
-	return `你是 Self-Data 报告助手。口径以打点需求 wiki 为准。写 SQL 前用 wiki_lookup 查事件和属性属于哪张表。
+	const tables = teTables(projectId, readStore().settings.te.schema || 'ta');
+	const platformAgents = readCapped(join(cwd, 'platform', 'AGENTS.md'), 4000);
+	const agents =
+		platformAgents ||
+		readCapped(join(cwd, 'AGENTS.md'), 4000);
+	const projectCtx = readCapped(join(cwd, 'projects', projectId, 'context', 'gaps.md'), 2500);
+	const tracking =
+		readCapped(join(cwd, 'projects', projectId, 'context', 'tracking-props.md'), 4000) ||
+		readCapped(join(cwd, 'agent/context/tracking-props.md'), 4000);
+	const liveCat =
+		readCapped(join(cwd, 'projects', projectId, 'context', 'live-catalog.md'), 3000) ||
+		readCapped(join(cwd, 'agent/context/live-catalog.md'), 3000);
+	const skills = loadLayeredSkills(projectId, slug, prompt);
+	return `你是 Self-Data 报告助手。口径以当前项目 wiki 为准。写 SQL 前用 wiki_lookup。
 
 当前页 slug: ${slug}
+活跃 projectId: ${projectId}
+表: ${tables.event} / ${tables.user}
 
-## 技能
-${skills}
+## 技能（平台 → 项目 → 当前页相关）
+${skills || '（无 skill）'}
 
 ## 打点需求列归属
-${tracking || '见 agent/context/tracking-props.md'}
+${tracking || '见 projects/' + projectId + '/context/tracking-props.md'}
 
-## 线上 OpenAPI 目录（管理页可刷新）
+## 项目 Gaps
+${projectCtx || '无'}
+
+## 线上 OpenAPI 目录
 ${liveCat || '尚未拉取。管理员可点「拉取数数最新表结构」。'}
 
-## TE 方言
-${agents || '见 AGENTS.md'}
+## TE 方言（平台）
+${agents || '见 platform/AGENTS.md'}
 
 ## 当前页 markdown
 ${pageMd.slice(0, 5000)}
 
-流程：wiki_lookup → 按 te-sql 写 SQL（用户属性 JOIN ta.v_user_51）→ run_sql 跑通 → patch_page。
+流程：wiki_lookup / search_sql_kb → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。
 禁止 FROM 查询别名。不要输出 Token。`;
 }
 
@@ -211,7 +336,19 @@ const TOOLS = [
 		type: 'function',
 		function: {
 			name: 'wiki_lookup',
-			description: '查打点需求：事件名、用户/事件属性属于哪张表、口径、示例 SQL。筛国家/测试用户前必须调用。',
+			description: '查当前项目打点需求：事件名、属性表归属、口径。筛国家/测试用户前必须调用。',
+			parameters: {
+				type: 'object',
+				properties: { query: { type: 'string' } },
+				required: ['query']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'search_sql_kb',
+			description: '按事件/指标指纹搜索本项目已成功跑通的 SQL 预览',
 			parameters: {
 				type: 'object',
 				properties: { query: { type: 'string' } },
@@ -260,7 +397,21 @@ function interpolateEvidenceSql(sql: string): string {
 		.replace(/\{\{\s*audience\.selected\s*\}\}/g, "'real'");
 }
 
-async function validatePatchMarkdown(markdown: string): Promise<string | null> {
+function sqlFingerprint(sql: string): { fingerprint: string; events: string[] } {
+	const events = [...sql.matchAll(/"\$part_event"\s*=\s*'([^']+)'/g)].map((m) => m[1]);
+	const hasAgg = /\bCOUNT\s*\(|\bSUM\s*\(|\bAVG\s*\(/i.test(sql);
+	const hasJoin = /\bJOIN\b/i.test(sql);
+	const fingerprint = [
+		events.sort().join('+') || 'no-event',
+		hasAgg ? 'agg' : 'raw',
+		hasJoin ? 'join' : 'single',
+		/\bGROUP\s+BY\b/i.test(sql) ? 'group' : 'nogroup'
+	].join('|');
+	return { fingerprint, events };
+}
+
+async function validatePatchMarkdown(markdown: string, projectId: string): Promise<string | null> {
+	const tables = teTables(projectId);
 	const tagRe = /\{%\s*(\w+)([^%]*?)\/%\}/g;
 	let m: RegExpExecArray | null;
 	while ((m = tagRe.exec(markdown))) {
@@ -284,7 +435,7 @@ async function validatePatchMarkdown(markdown: string): Promise<string | null> {
 	if (!fences.length) return '改页必须包含 ```sql name 查询。图表 data= 必须等于这个 name，name 不是数数表。';
 	for (const fence of fences) {
 		if (!/ta\.v_event_\d+|ta\.v_user_\d+|ta\.user_day_serial_\d+/.test(fence.sql)) {
-			return `查询 ${fence.name} 必须 FROM ta.v_event_51（或用户表）。页内 sql 名只是别名，禁止 FROM ${fence.name}。按 te-sql 重写。`;
+			return `查询 ${fence.name} 必须 FROM ${tables.event}（或用户表）。页内 sql 名只是别名，禁止 FROM ${fence.name}。按 te-sql 重写。`;
 		}
 		const sql = interpolateEvidenceSql(fence.sql);
 		const result = await runQuery(sql);
@@ -295,22 +446,50 @@ async function validatePatchMarkdown(markdown: string): Promise<string | null> {
 	return null;
 }
 
+function rememberSuccessfulSql(projectId: string, sql: string) {
+	const { fingerprint, events } = sqlFingerprint(sql);
+	const sqlHash = createHash('sha256').update(sql).digest('hex').slice(0, 16);
+	let wikiVersion = '';
+	try {
+		const cat = JSON.parse(readFileSync(catalogPath(projectId), 'utf8')) as { projectId?: unknown };
+		wikiVersion = String(cat.projectId ?? projectId);
+	} catch {
+		wikiVersion = projectId;
+	}
+	upsertSqlKb({
+		projectId,
+		fingerprint,
+		sqlHash,
+		sqlPreview: sql.replace(/\s+/g, ' ').slice(0, 240),
+		wikiVersion,
+		eventHints: events
+	});
+}
+
 async function runTool(
 	name: string,
 	args: Record<string, string>,
-	user: PublicUser
+	user: PublicUser,
+	projectId: string
 ): Promise<string> {
 	if (name === 'run_sql') {
 		const sql = interpolateEvidenceSql(String(args.sql || ''));
 		const result = await runQuery(sql);
 		if (result.error) return JSON.stringify({ error: result.error });
+		rememberSuccessfulSql(projectId, sql);
 		return JSON.stringify({
 			rows: (result.rows || []).slice(0, 20),
 			rowCount: result.rows?.length ?? 0
 		});
 	}
 	if (name === 'wiki_lookup') {
-		return wikiLookup(String(args.query || ''));
+		return wikiLookup(String(args.query || ''), projectId);
+	}
+	if (name === 'search_sql_kb') {
+		return JSON.stringify({
+			projectId,
+			hits: searchSqlKb(projectId, String(args.query || ''))
+		});
 	}
 	if (name === 'read_page') {
 		const md = readPageMarkdown(String(args.slug || ''));
@@ -321,13 +500,20 @@ async function runTool(
 		if (user.role === 'viewer') return JSON.stringify({ error: 'viewer 不能改页' });
 		const slug = String(args.slug || '');
 		const markdown = String(args.markdown || '');
-		const invalid = await validatePatchMarkdown(markdown);
+		const invalid = await validatePatchMarkdown(markdown, projectId);
 		if (invalid) return JSON.stringify({ error: invalid });
 		const lock = acquireLock(slug, user);
 		if ('error' in lock) return JSON.stringify({ error: lock.error });
 		const written = writePageMarkdown(slug, markdown);
 		if ('error' in written) return JSON.stringify(written);
-		return JSON.stringify({ ok: true, slug });
+		appendAudit({
+			userId: user.id,
+			username: user.username,
+			action: 'patch_page',
+			slug,
+			detail: `projectId=${projectId}`
+		});
+		return JSON.stringify({ ok: true, slug, projectId });
 	}
 	return JSON.stringify({ error: `未知工具 ${name}` });
 }
@@ -336,7 +522,7 @@ export async function productChat(input: {
 	prompt: string;
 	slug: string;
 	user: PublicUser;
-}): Promise<{ reply: string; patched?: boolean }> {
+}): Promise<{ reply: string; patched?: boolean; projectId: string }> {
 	const cfg = aiConfig();
 	if (!cfg.apiKey && cfg.provider !== 'ollama') {
 		throw new Error('未配置 AI Key。请在管理页填写。');
@@ -345,9 +531,14 @@ export async function productChat(input: {
 		throw new Error('未配置 AI Base URL。');
 	}
 	const pageMd = readPageMarkdown(input.slug) || '';
+	const projectId = resolveActiveProject(pageMd);
 	const target = chatTarget(cfg);
+
+	const history: ChatTurn[] = getChat(input.user.id, projectId, input.slug).slice(-12);
+
 	const messages: ChatMessage[] = [
-		{ role: 'system', content: systemPrompt(input.slug, pageMd) },
+		{ role: 'system', content: systemPrompt(input.slug, pageMd, projectId, input.prompt) },
+		...history.map((h) => ({ role: h.role as 'user' | 'assistant', content: h.text })),
 		{ role: 'user', content: input.prompt }
 	];
 	let patched = false;
@@ -381,11 +572,13 @@ export async function productChat(input: {
 		return msg;
 	}
 
+	let reply = '';
 	for (let round = 0; round < maxRounds; round++) {
 		const msg = await complete({ tools: TOOLS });
 		const calls = msg.tool_calls;
 		if (!calls?.length) {
-			return { reply: msg.content || (patched ? '已按你的要求改页。' : '（无内容）'), patched };
+			reply = msg.content || (patched ? '已按你的要求改页。' : '（无内容）');
+			break;
 		}
 		messages.push({ role: 'assistant', content: msg.content || '', tool_calls: calls });
 		for (const call of calls) {
@@ -396,19 +589,24 @@ export async function productChat(input: {
 				args = {};
 			}
 			if (call.function.name === 'patch_page') patched = true;
-			const out = await runTool(call.function.name, args, input.user);
+			const out = await runTool(call.function.name, args, input.user, projectId);
 			messages.push({ role: 'tool', tool_call_id: call.id, content: out });
 		}
 	}
-	messages.push({
-		role: 'user',
-		content: '不要再调用工具。用中文简短说明已经完成或还缺什么。'
-	});
-	const last = await complete({});
-	return {
-		reply: last.content || (patched ? '已改页，请看左侧预览。' : '未改页，请把需求再说具体一点。'),
-		patched
-	};
+	if (!reply) {
+		messages.push({
+			role: 'user',
+			content: '不要再调用工具。用中文简短说明已经完成或还缺什么。'
+		});
+		const last = await complete({});
+		reply = last.content || (patched ? '已改页，请看左侧预览。' : '未改页，请把需求再说具体一点。');
+	}
+
+	const now = new Date().toISOString();
+	appendChat(input.user.id, projectId, input.slug, [
+		{ role: 'user', text: input.prompt, at: now },
+		{ role: 'assistant', text: reply, at: now }
+	]);
+
+	return { reply, patched, projectId };
 }
-
-

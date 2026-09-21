@@ -3,6 +3,7 @@
 	import { Input } from '@evidence/core/shadcn/components/ui/input';
 	import { Query } from '@evidence/core/Query.svelte';
 	import { invalidateAll } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import { X } from 'lucide-svelte';
 
 	type Msg = { role: 'user' | 'assistant'; text: string };
@@ -13,6 +14,23 @@
 	let pending = $state(false);
 	let error = $state('');
 	let messages = $state<Msg[]>([]);
+	let projectId = $state('');
+
+	onMount(async () => {
+		try {
+			const res = await fetch(`/api/modules/ai/history?slug=${encodeURIComponent(slug)}`);
+			const json = await res.json();
+			if (res.ok) {
+				projectId = json.projectId || '';
+				messages = (json.messages || []).map((m: { role: string; text: string }) => ({
+					role: m.role === 'assistant' ? 'assistant' : 'user',
+					text: m.text
+				}));
+			}
+		} catch {
+			// empty history is fine
+		}
+	});
 
 	async function send() {
 		const text = prompt.trim();
@@ -32,6 +50,7 @@
 			error = json.error || '失败';
 			return;
 		}
+		if (json.projectId) projectId = json.projectId;
 		messages = [...messages, { role: 'assistant', text: json.reply }];
 		if (json.patched) {
 			await invalidateAll();
@@ -44,7 +63,9 @@
 	<div class="flex h-12 items-center justify-between border-b px-3">
 		<div>
 			<div class="text-sm font-medium">AI</div>
-			<div class="text-muted-foreground text-[11px]">/{slug}</div>
+			<div class="text-muted-foreground text-[11px]">
+				/{slug}{#if projectId}<span class="ml-1">· project {projectId}</span>{/if}
+			</div>
 		</div>
 		<Button variant="ghost" size="icon-sm" onclick={onClose} aria-label="关闭 AI">
 			<X class="size-4" />
@@ -53,7 +74,7 @@
 	<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
 		{#if messages.length === 0}
 			<p class="text-muted-foreground text-xs leading-5">
-				问口径、查数，或让 AI 改这一页。左边报告还在。viewer 不能写页。
+				问口径、查数，或让 AI 改这一页。左边报告还在。viewer 不能写页。对话按项目隔离并会保存。
 			</p>
 		{/if}
 		{#each messages as m, i (i)}

@@ -354,6 +354,11 @@
 				>
 					<div class="flex items-center gap-2 px-4">
 						<Sidebar.Trigger class="-ml-1" />
+						{#if showPageTools && data.teProjectId}
+							<span class="text-muted-foreground hidden text-[11px] sm:inline"
+								>TE project {data.teProjectId}</span
+							>
+						{/if}
 					</div>
 
 					<div class="flex items-center gap-1">
