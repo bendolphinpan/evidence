@@ -378,7 +378,7 @@ try {
 			const open = args.open ?? !isSource;
 			if (isSource) {
 				const { startDevServer } = await import('./server.dev.ts');
-				await startDevServer({ port: args.port, open });
+				await startDevServer({ port: args.port, open, host: args.host });
 			} else {
 				const { startServer } = await import('./server.ts');
 				await startServer({ port: args.port, open, host: args.host });

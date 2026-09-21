@@ -4,6 +4,8 @@ import path from 'node:path';
 import { isServeMode, basicAuthConfigured } from '$lib/server/serve-mode';
 import { checkBasicAuth, SERVE_HARDENED_HEADERS } from '$cli/basic-auth';
 import { getProjectCwd } from '$lib/server/project-cwd';
+import { modulesEnabled } from '$lib/modules/store';
+import { SESSION_COOKIE, userFromToken } from '$lib/modules/auth';
 
 const STATIC_CONTENT_TYPES: Record<string, string> = {
 	'.png': 'image/png',
@@ -96,9 +98,37 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	}
 
+	const mods = modulesEnabled();
+	if (mods.auth) {
+		const path = event.url.pathname;
+		const publicPath =
+			path === '/login' ||
+			path.startsWith('/api/modules/auth/login') ||
+			path.startsWith('/_app') ||
+			path.startsWith('/@') ||
+			path.startsWith('/node_modules');
+		if (!publicPath) {
+			const user = userFromToken(event.cookies.get(SESSION_COOKIE));
+			if (!user) {
+				if (path.startsWith('/api/')) {
+					return Response.json({ error: '未登录' }, { status: 401 });
+				}
+				const next = encodeURIComponent(path + event.url.search);
+				return new Response(null, {
+					status: 302,
+					headers: { Location: `/login?next=${next}` }
+				});
+			}
+			event.locals.productUser = user;
+		}
+	}
+
 	if (isServeMode()) {
 		const path = event.url.pathname;
-		if (SERVE_DISABLED_PATHS.some((p) => path === p || path.startsWith(`${p}/`))) {
+		if (
+			!mods.auth &&
+			SERVE_DISABLED_PATHS.some((p) => path === p || path.startsWith(`${p}/`))
+		) {
 			return new Response('Not Found', { status: 404 });
 		}
 

@@ -17,10 +17,12 @@ import { ensureStudioServerOrExit } from './server.shared.ts';
 export interface DevServerOptions {
 	port: number;
 	open: boolean;
+	host?: string | null;
 }
 
 export async function startDevServer(options: DevServerOptions): Promise<void> {
 	const { port, open } = options;
+	const host = options.host || '127.0.0.1';
 
 	await ensureStudioServerOrExit();
 
@@ -30,7 +32,7 @@ export async function startDevServer(options: DevServerOptions): Promise<void> {
 	// output that vite dev serves from static/ but never produces, and the `dev`
 	// script chains that build. Without it every {% html %} / {% custom_echart %}
 	// block renders blank in source-dev mode.
-	const viteArgs = ['run', 'dev', '--port', String(port)];
+	const viteArgs = ['run', 'dev', '--port', String(port), '--host', host, '--strictPort'];
 	if (open) viteArgs.push('--open');
 
 	const projectCwd = process.env.EVIDENCE_PROJECT_CWD ?? process.cwd();

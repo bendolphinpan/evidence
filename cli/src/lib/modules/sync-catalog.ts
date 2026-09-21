@@ -1,0 +1,130 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getProjectCwd } from '$lib/server/project-cwd';
+import { readStore } from './store';
+
+type LiveProp = { name: string; display?: string; type?: string; tableType?: string; desc?: string };
+type LiveEvent = { name: string; display?: string; desc?: string };
+export type LiveCatalog = {
+	fetchedAt: string;
+	projectId: string;
+	schema: string;
+	tables: { event: string; user: string; serial: string };
+	events: LiveEvent[];
+	eventProps: LiveProp[];
+	userProps: LiveProp[];
+	source: 'openapi';
+};
+
+function teCreds() {
+	const te = readStore().settings.te;
+	return {
+		url: (te.url || process.env.TE_OPENAPI_URL || '').replace(/\/+$/, ''),
+		token: te.token || process.env.TE_OPENAPI_TOKEN || '',
+		projectId: te.projectId || process.env.TE_PROJECT_ID || '51',
+		schema: te.schema || process.env.TE_SCHEMA || 'ta'
+	};
+}
+
+function mapProp(raw: Record<string, unknown>, tableType: string): LiveProp | null {
+	const name = String(raw.columnName || raw.name || '');
+	if (!name) return null;
+	return {
+		name,
+		display: String(raw.columnDesc || raw.columnRemark || '') || undefined,
+		type: String(raw.selectType || raw.columnType || raw.propType || 'string'),
+		tableType,
+		desc: String(raw.columnRemark || raw.columnDesc || '') || undefined
+	};
+}
+
+async function teGet(base: string, token: string, path: string, query: Record<string, string>) {
+	const url = new URL(path, `${base}/`);
+	url.searchParams.set('token', token);
+	for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+	const res = await fetch(url);
+	const text = await res.text();
+	let json: { return_code?: number; return_message?: string; data?: Record<string, unknown> };
+	try {
+		json = JSON.parse(text);
+	} catch {
+		throw new Error(`OpenAPI ${path} 非 JSON：${text.slice(0, 160)}`);
+	}
+	if (res.status >= 400 || (json.return_code !== undefined && json.return_code !== 0)) {
+		throw new Error(json.return_message || `OpenAPI ${path} HTTP ${res.status}`);
+	}
+	return json;
+}
+
+export async function fetchAndWriteLiveCatalog(): Promise<{
+	catalog: LiveCatalog;
+	paths: { snapshot: string; liveMd: string };
+}> {
+	const creds = teCreds();
+	if (!creds.url || !creds.token) throw new Error('未配置数数 URL / Token');
+	const projectId = creds.projectId;
+	const schema = creds.schema;
+	const eventMeta = await teGet(creds.url, creds.token, '/open/list-event-meta', { projectId });
+	const eventsRaw = (eventMeta.data?.events || eventMeta.data?.list || []) as Array<Record<string, unknown>>;
+	let eventPropsRaw: Array<Record<string, unknown>> = [];
+	let userPropsRaw: Array<Record<string, unknown>> = [];
+	try {
+		const ev = await teGet(creds.url, creds.token, '/open/list-props', { projectId, tableType: 'event' });
+		eventPropsRaw = (ev.data?.properties || ev.data?.list || []) as Array<Record<string, unknown>>;
+	} catch {
+		eventPropsRaw = [];
+	}
+	try {
+		const us = await teGet(creds.url, creds.token, '/open/list-props', { projectId, tableType: 'user' });
+		userPropsRaw = (us.data?.properties || us.data?.list || []) as Array<Record<string, unknown>>;
+	} catch {
+		userPropsRaw = [];
+	}
+	const catalog: LiveCatalog = {
+		fetchedAt: new Date().toISOString(),
+		projectId,
+		schema,
+		tables: {
+			event: `${schema}.v_event_${projectId}`,
+			user: `${schema}.v_user_${projectId}`,
+			serial: `${schema}.user_day_serial_${projectId}`
+		},
+		events: eventsRaw
+			.map((ev) => ({
+				name: String(ev.eventName || ''),
+				display: String(ev.eventDesc || ev.remark || '') || undefined,
+				desc: String(ev.remark || ev.eventDesc || '') || undefined
+			}))
+			.filter((e) => e.name)
+			.sort((a, b) => a.name.localeCompare(b.name)),
+		eventProps: eventPropsRaw.map((p) => mapProp(p, 'event')).filter((p): p is LiveProp => Boolean(p)),
+		userProps: userPropsRaw.map((p) => mapProp(p, 'user')).filter((p): p is LiveProp => Boolean(p)),
+		source: 'openapi'
+	};
+
+	const root = join(getProjectCwd(), '..');
+	const syncDir = join(root, 'llm_wiki', 'sync');
+	mkdirSync(syncDir, { recursive: true });
+	const snapshot = join(syncDir, 'te_live_snapshot.json');
+	writeFileSync(snapshot, JSON.stringify(catalog, null, 2), 'utf8');
+
+	const liveMd = join(getProjectCwd(), 'agent', 'context', 'live-catalog.md');
+	mkdirSync(join(getProjectCwd(), 'agent', 'context'), { recursive: true });
+	const lines = [
+		`# 线上数数目录（OpenAPI ${catalog.fetchedAt}）`,
+		'',
+		`表：\`${catalog.tables.event}\` / \`${catalog.tables.user}\``,
+		'',
+		'## 事件',
+		...catalog.events.slice(0, 200).map((e) => `- \`${e.name}\` ${e.display || ''}`),
+		'',
+		'## 事件属性',
+		...catalog.eventProps.slice(0, 300).map((p) => `- \`${p.name}\` ${p.display || p.type || ''} · ta.v_event_${projectId}`),
+		'',
+		'## 用户属性',
+		...catalog.userProps.slice(0, 300).map((p) => `- \`${p.name}\` ${p.display || p.type || ''} · ta.v_user_${projectId} · SQL: u."${p.name}"`)
+	];
+	writeFileSync(liveMd, lines.join('\n') + '\n', 'utf8');
+
+	return { catalog, paths: { snapshot, liveMd } };
+}

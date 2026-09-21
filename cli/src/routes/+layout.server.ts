@@ -16,6 +16,7 @@ import { selectLanguage } from '@evidence/core/translations/resolve-translations
 import { SIDEBAR_WIDTH_COOKIE_NAME } from '@evidence/core/shadcn/components/ui/sidebar/constants.js';
 import { getTranslationLanguages } from '$lib/server/translations.server';
 import type { WarehouseType } from '@evidence/core/sql-dialect';
+import { modulesEnabled } from '$lib/modules/store';
 const PUBLIC_STUDIO_HOST = process.env.PUBLIC_STUDIO_HOST ?? 'https://evidence.studio';
 
 const STUDIO_HOST = PUBLIC_STUDIO_HOST.replace(/\/$/, '');
@@ -58,7 +59,7 @@ async function getOrgInfo(refreshToken: string, storedOrgId: string | null) {
 	return orgCache;
 }
 
-export const load: LayoutServerLoad = async ({ url, cookies }) => {
+export const load: LayoutServerLoad = async ({ url, cookies, locals }) => {
 	const cwd = getProjectCwd();
 	const isServe = isServeMode();
 	const navItems = await getNavItems(cwd);
@@ -107,6 +108,8 @@ export const load: LayoutServerLoad = async ({ url, cookies }) => {
 		organizations,
 		connectionType,
 		hasLocalConnection,
-		isServe
+		isServe,
+		productUser: locals.productUser ?? null,
+		modules: modulesEnabled()
 	};
 };

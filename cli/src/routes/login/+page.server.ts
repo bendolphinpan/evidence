@@ -1,27 +1,26 @@
-/**
- * Login page server load
- * Redirects to home if already authenticated
- */
-
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import type { PageServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { loadCredentials } from '$lib/auth/credentials.server';
 import { getProjectCwd } from '$lib/server/project-cwd';
+import { modulesEnabled } from '$lib/modules/store';
+import { SESSION_COOKIE, userFromToken } from '$lib/modules/auth';
 
-export const load: PageServerLoad = async () => {
-	// Check if credentials exist (don't validate on every request)
+export const load: PageServerLoad = async ({ cookies, url }) => {
+	const mods = modulesEnabled();
+	if (mods.auth) {
+		if (userFromToken(cookies.get(SESSION_COOKIE))) {
+			redirect(302, url.searchParams.get('next') || '/');
+		}
+		return { productAuth: true };
+	}
+
 	const credentials = await loadCredentials();
-
-	// Already authenticated, or a local connection.yaml project that needs no
-	// login — either way there's no reason to sit on the login wall.
 	const hasLocalConnection = existsSync(path.join(getProjectCwd(), 'connection.yaml'));
 	if (credentials?.organizationId || hasLocalConnection) {
 		redirect(302, '/');
 	}
 
-	return {
-		authenticated: false
-	};
+	return { productAuth: false, authenticated: false };
 };

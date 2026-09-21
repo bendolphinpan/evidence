@@ -20,8 +20,13 @@
 		MoonIcon,
 		Fullscreen,
 		Minimize,
-		User
+		User,
+		RefreshCw,
+		Pencil
 	} from 'lucide-svelte';
+	import { Query } from '@evidence/core/Query.svelte';
+	import { goto } from '$app/navigation';
+	import AiDock from '$lib/modules/AiDock.svelte';
 	import { createFullscreen } from '@evidence/core/utils/fullscreen.svelte';
 	import { ModeWatcher, mode, toggleMode } from 'mode-watcher';
 	import { Toaster, toast } from 'svelte-sonner';
@@ -45,6 +50,28 @@
 	const themeCSS = $derived(generateThemeCSS(data.resolvedTheme));
 
 	const isLoginPage = $derived(page.url.pathname === '/login');
+	const isEmbed = $derived(page.url.searchParams.get('embed') === '1');
+	const productUser = $derived(data.productUser);
+	const canEdit = $derived(!!productUser && productUser.role !== 'viewer');
+	const pageSlug = $derived(
+		page.url.pathname === '/' ? 'index' : page.url.pathname.replace(/^\//, '')
+	);
+	const showPageTools = $derived(
+		!!data.modules?.auth &&
+			!page.url.pathname.startsWith('/__') &&
+			page.url.pathname !== '/login'
+	);
+
+	let aiOpen = $state(false);
+
+	function refreshQueries() {
+		Query.refreshAll();
+	}
+
+	async function logoutProduct() {
+		await fetch('/api/modules/auth/logout', { method: 'POST' });
+		await goto('/login');
+	}
 
 	// Fullscreen presentation mode (bare content, auto-hiding controls). Shared
 	// behaviour with the Studio published/preview viewers.
@@ -129,13 +156,19 @@
 	{@html `<style>${themeCSS}</style>`}
 </svelte:head>
 
-<ModeWatcher />
+<ModeWatcher defaultMode="light" />
 <Toaster />
 <svelte:document onmousemove={fs.active ? fs.handleMouseMove : undefined} />
 
 {#if isLoginPage}
 	<!-- Login page renders without sidebar -->
 	{@render children()}
+{:else if isEmbed}
+	<main class="bg-background h-svh overflow-auto overflow-x-hidden scroll-smooth p-4">
+		{#key page.url.pathname}
+			{@render children()}
+		{/key}
+	</main>
 {:else if fs.active}
 	<!-- Fullscreen presentation: bare content, no sidebar/header chrome -->
 	<main
@@ -208,17 +241,25 @@
 											{...props}
 											class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
 										>
-											{#if data.user}
-												{@const user = data.user}
-												<Avatar.Root class="h-8 w-8 rounded-lg">
-													<Avatar.Image src={user.profilePictureUrl} alt={displayName(user)} />
-													<Avatar.Fallback class="rounded-lg">{initials(user)}</Avatar.Fallback>
-												</Avatar.Root>
-												<div class="grid flex-1 text-left text-sm leading-tight">
-													<span class="truncate font-semibold">{displayName(user)}</span>
-													<span class="text-muted-foreground truncate text-xs">{user.email}</span>
-												</div>
-											{:else}
+										{#if productUser}
+											<Avatar.Root class="h-8 w-8 rounded-lg">
+												<Avatar.Fallback class="rounded-lg">{productUser.username.slice(0, 2)}</Avatar.Fallback>
+											</Avatar.Root>
+											<div class="grid flex-1 text-left text-sm leading-tight">
+												<span class="truncate font-semibold">{productUser.username}</span>
+												<span class="text-muted-foreground truncate text-xs">{productUser.role}</span>
+											</div>
+										{:else if data.user}
+											{@const user = data.user}
+											<Avatar.Root class="h-8 w-8 rounded-lg">
+												<Avatar.Image src={user.profilePictureUrl} alt={displayName(user)} />
+												<Avatar.Fallback class="rounded-lg">{initials(user)}</Avatar.Fallback>
+											</Avatar.Root>
+											<div class="grid flex-1 text-left text-sm leading-tight">
+												<span class="truncate font-semibold">{displayName(user)}</span>
+												<span class="text-muted-foreground truncate text-xs">{user.email}</span>
+											</div>
+										{:else}
 												<Avatar.Root class="h-8 w-8 rounded-lg">
 													<Avatar.Fallback class="bg-muted text-muted-foreground rounded-lg">
 														<User class="size-4" />
@@ -233,7 +274,15 @@
 									{/snippet}
 								</DropdownMenu.Trigger>
 								<DropdownMenu.Content align="end" side="top" class="w-56">
-									{#if data.user}
+									{#if productUser}
+									<DropdownMenu.Label class="text-muted-foreground text-xs font-normal">
+										{productUser.username} · {productUser.role}
+									</DropdownMenu.Label>
+									<DropdownMenu.Item class="cursor-pointer" onclick={logoutProduct}>
+										退出
+									</DropdownMenu.Item>
+									<DropdownMenu.Separator />
+								{:else if data.user}
 										{@const user = data.user}
 										<DropdownMenu.Label class="p-0 font-normal">
 											<div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
@@ -308,6 +357,36 @@
 					</div>
 
 					<div class="flex items-center gap-1">
+						{#if showPageTools}
+							<Button variant="ghost" size="sm" class="h-8 text-xs" onclick={refreshQueries}>
+								<RefreshCw class="mr-1 h-3.5 w-3.5" />
+								刷新
+							</Button>
+							{#if canEdit}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="h-8 text-xs"
+									onclick={() => goto(`/__edit/${pageSlug}`)}
+								>
+									<Pencil class="mr-1 h-3.5 w-3.5" />
+									编辑
+								</Button>
+							{/if}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="h-8 text-xs"
+								onclick={() => (aiOpen = !aiOpen)}
+							>
+								AI
+							</Button>
+							{#if productUser?.role === 'admin'}
+								<Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => goto('/__admin')}>
+									管理
+								</Button>
+							{/if}
+						{/if}
 						<DropdownMenu.Root>
 							<DropdownMenu.Trigger>
 								<Button variant="ghost" size="icon" class="h-8 w-8 p-0">
@@ -348,11 +427,15 @@
 						</DropdownMenu.Root>
 					</div>
 				</header>
-				<div class="report-viewport min-w-0 flex-1 overflow-auto overflow-x-hidden scroll-smooth">
-					<!-- Remount page on navigation so that contexts are re-initialized properly -->
-					{#key page.url.pathname}
-						{@render children()}
-					{/key}
+				<div class="flex min-h-0 min-w-0 flex-1">
+					<div class="report-viewport min-w-0 flex-1 overflow-auto overflow-x-hidden scroll-smooth">
+						{#key page.url.pathname}
+							{@render children()}
+						{/key}
+					</div>
+					{#if aiOpen && !isLoginPage}
+						<AiDock slug={pageSlug} onClose={() => (aiOpen = false)} />
+					{/if}
 				</div>
 			</Sidebar.Inset>
 		</Sidebar.Provider>
