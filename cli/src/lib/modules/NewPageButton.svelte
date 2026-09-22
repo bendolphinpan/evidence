@@ -3,12 +3,11 @@
 	import { Button } from '@evidence/core/shadcn/components/ui/button';
 	import { Input } from '@evidence/core/shadcn/components/ui/input';
 	import { Plus } from 'lucide-svelte';
-	import { createReportPage } from './new-page';
+	import { createReportPage, slugFromTitle } from './new-page';
 
 	let { projectId }: { projectId: string } = $props();
 
 	let open = $state(false);
-	let slug = $state('');
 	let title = $state('');
 	let message = $state('');
 	let busy = $state(false);
@@ -18,13 +17,12 @@
 		busy = true;
 		message = '';
 		try {
-			const result = await createReportPage({ slug, title, projectId });
+			const result = await createReportPage({ slug: slugFromTitle(title), title, projectId });
 			if ('error' in result) {
 				message = result.error;
 				return;
 			}
 			open = false;
-			slug = '';
 			title = '';
 			await invalidateAll();
 			await goto(result.href);
@@ -43,9 +41,9 @@
 	新建页面
 </button>
 {#if open}
-	<form class="space-y-2 px-2 py-1" onsubmit={submit}>
-		<Input class="h-8" placeholder="路径，如 retention" bind:value={slug} required />
-		<Input class="h-8" placeholder="标题" bind:value={title} />
+	<form class="bg-card mx-2 mb-2 space-y-2 rounded-md border p-3 shadow-xs" onsubmit={submit}>
+		<div class="text-sm font-medium">新报告</div>
+		<Input class="h-8" placeholder="标题，例如 次日留存" bind:value={title} required />
 		{#if message}
 			<p class="text-destructive text-xs">{message}</p>
 		{/if}

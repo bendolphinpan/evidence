@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getProjectCwd } from '$lib/server/project-cwd';
 import { readStore } from './store';
@@ -16,13 +16,30 @@ export type LiveCatalog = {
 	source: 'openapi';
 };
 
+function connectionYamlCreds(): { url: string; token: string; projectId: string; schema: string } {
+	const file = join(getProjectCwd(), 'connection.yaml');
+	if (!existsSync(file)) return { url: '', token: '', projectId: '', schema: '' };
+	const text = readFileSync(file, 'utf8');
+	const pick = (key: string) => {
+		const match = text.match(new RegExp(`^${key}:\\s*["']?([^"'\\n#]+)`, 'm'));
+		return match ? match[1].trim() : '';
+	};
+	return {
+		url: pick('url'),
+		token: pick('token'),
+		projectId: pick('project_id') || pick('projectId'),
+		schema: pick('schema')
+	};
+}
+
 function teCreds() {
 	const te = readStore().settings.te;
+	const file = connectionYamlCreds();
 	return {
-		url: (te.url || process.env.TE_OPENAPI_URL || '').replace(/\/+$/, ''),
-		token: te.token || process.env.TE_OPENAPI_TOKEN || '',
-		projectId: te.projectId || process.env.TE_PROJECT_ID || '51',
-		schema: te.schema || process.env.TE_SCHEMA || 'ta'
+		url: (te.url || file.url || process.env.TE_OPENAPI_URL || '').replace(/\/+$/, ''),
+		token: te.token || file.token || process.env.TE_OPENAPI_TOKEN || '',
+		projectId: te.projectId || file.projectId || process.env.TE_PROJECT_ID || '51',
+		schema: te.schema || file.schema || process.env.TE_SCHEMA || 'ta'
 	};
 }
 

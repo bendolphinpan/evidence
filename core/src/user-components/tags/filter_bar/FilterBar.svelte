@@ -11,14 +11,13 @@
 	const floating = $derived(!intersectionState.isIntersecting);
 </script>
 
-<!-- Element to detect scroll intersection -->
-<!-- The margins here should match the padding on the scroll area -->
-<div use:intersectionAction aria-hidden="true" class="pointer-events-none -mt-4 mb-4 h-0 w-0"></div>
+<!-- Zero-size sentinel. Do not give it vertical margin: inside a card that margin renders as an empty header. -->
+<div use:intersectionAction aria-hidden="true" class="pointer-events-none h-0 w-0"></div>
 
 <div
 	class={cn(
-		'sticky top-4 right-0 left-0 z-50 flex flex-row flex-wrap items-end gap-4 rounded-md border pt-3 pb-2 transition-all',
-		floating ? 'bg-background border-border px-4 shadow' : 'border-transparent shadow-none'
+		'sticky top-4 right-0 left-0 z-50 flex flex-row flex-wrap items-center gap-4 rounded-md border transition-all',
+		floating ? 'bg-background border-border px-4 pt-3 shadow' : 'border-transparent shadow-none'
 	)}
 >
 	{@render children?.()}

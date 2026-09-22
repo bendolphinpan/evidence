@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { createReportPage } from '$lib/modules/new-page';
+	import { createReportPage, slugFromTitle } from '$lib/modules/new-page';
 	import { Button } from '@evidence/core/shadcn/components/ui/button';
 	import { Input } from '@evidence/core/shadcn/components/ui/input';
 	import * as Card from '@evidence/core/shadcn/components/ui/card';
@@ -26,7 +26,7 @@
 	};
 	let savedFilters = $state<SavedFilter[]>([]);
 	let filterForm = $state({ id: '', key: '', name: '', description: '', sql: '' });
-	let pageForm = $state({ slug: '', title: '' });
+	let pageForm = $state({ title: '' });
 	let creatingPage = $state(false);
 	let audit = $state<{ at: string; username: string; action: string; slug: string; detail: string }[]>([]);
 	const navItems = $derived(
@@ -93,7 +93,7 @@
 		message = '';
 		try {
 			const result = await createReportPage({
-				slug: pageForm.slug,
+				slug: slugFromTitle(pageForm.title),
 				title: pageForm.title,
 				projectId: te.projectId || '51',
 				schema: te.schema
@@ -102,7 +102,7 @@
 				message = result.error;
 				return;
 			}
-			pageForm = { slug: '', title: '' };
+			pageForm = { title: '' };
 			await invalidateAll();
 			await goto(result.href);
 		} finally {
@@ -196,8 +196,7 @@
 		</Card.Header>
 		<Card.Content class="space-y-3 px-6">
 			<form class="flex flex-wrap gap-2" onsubmit={createPage}>
-				<Input class="w-40" placeholder="路径，如 retention" bind:value={pageForm.slug} required />
-				<Input class="w-48" placeholder="标题" bind:value={pageForm.title} />
+				<Input class="w-48" placeholder="标题，例如 次日留存" bind:value={pageForm.title} required />
 				<Button type="submit" size="sm" disabled={creatingPage}>
 					{creatingPage ? '创建中…' : '新建页面'}
 				</Button>

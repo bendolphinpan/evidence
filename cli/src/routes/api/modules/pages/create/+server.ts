@@ -16,7 +16,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	const projectId = String(body.projectId || '51');
 	const schema = String(body.schema || 'ta');
 	if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
-		return json({ error: '路径只允许小写字母、数字和连字符，并且以字母开头' }, { status: 400 });
+		return json({ error: '链接名只能用小写英文、数字和连字符，并且以字母开头' }, { status: 400 });
 	}
 	const markdown =
 		typeof body.markdown === 'string' && body.markdown.trim()
