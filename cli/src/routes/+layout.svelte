@@ -22,11 +22,14 @@
 		Minimize,
 		User,
 		RefreshCw,
-		Pencil
+		Pencil,
+		SlidersHorizontal
 	} from 'lucide-svelte';
 	import { Query } from '@evidence/core/Query.svelte';
 	import { goto } from '$app/navigation';
 	import AiDock from '$lib/modules/AiDock.svelte';
+	import NewPageButton from '$lib/modules/NewPageButton.svelte';
+	import GlobalFilterDrawer from '$lib/modules/GlobalFilterDrawer.svelte';
 	import { createFullscreen } from '@evidence/core/utils/fullscreen.svelte';
 	import { ModeWatcher, mode, toggleMode } from 'mode-watcher';
 	import { Toaster, toast } from 'svelte-sonner';
@@ -63,6 +66,7 @@
 	);
 
 	let aiOpen = $state(false);
+	let filterOpen = $state(false);
 
 	function refreshQueries() {
 		Query.refreshAll();
@@ -207,23 +211,20 @@
 						<Sidebar.GroupContent>
 							<Sidebar.Menu>
 								{#if data.navItems.length === 0}
-									<p class="text-muted-foreground px-3 text-sm">No pages found</p>
+									<p class="text-muted-foreground px-3 text-sm">还没有页面</p>
+									{#if canEdit}
+										<Sidebar.MenuItem>
+											<NewPageButton projectId={data.teProjectId || '51'} />
+										</Sidebar.MenuItem>
+									{/if}
 								{:else}
 									<Sidebar.Group>
-										{#if data.projectName}
+										<PageNavTree tree={navTree} currentPath={page.url.pathname} />
+										{#if canEdit}
 											<Sidebar.MenuItem>
-												<Sidebar.MenuButton class="text-muted-foreground font-medium capitalize">
-													{#snippet child()}
-														<span
-															class="text-primary flex h-7 w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1 text-left text-sm font-medium capitalize"
-														>
-															{data.projectName}
-														</span>
-													{/snippet}
-												</Sidebar.MenuButton>
+												<NewPageButton projectId={data.teProjectId || '51'} />
 											</Sidebar.MenuItem>
 										{/if}
-										<PageNavTree tree={navTree} currentPath={page.url.pathname} />
 									</Sidebar.Group>
 								{/if}
 							</Sidebar.Menu>
@@ -278,6 +279,11 @@
 									<DropdownMenu.Label class="text-muted-foreground text-xs font-normal">
 										{productUser.username} · {productUser.role}
 									</DropdownMenu.Label>
+									{#if productUser.role === 'admin'}
+										<DropdownMenu.Item class="cursor-pointer" onclick={() => goto('/__admin')}>
+											管理
+										</DropdownMenu.Item>
+									{/if}
 									<DropdownMenu.Item class="cursor-pointer" onclick={logoutProduct}>
 										退出
 									</DropdownMenu.Item>
@@ -363,6 +369,15 @@
 
 					<div class="flex items-center gap-1">
 						{#if showPageTools}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="h-8 text-xs"
+								onclick={() => (filterOpen = !filterOpen)}
+							>
+								<SlidersHorizontal class="mr-1 h-3.5 w-3.5" />
+								筛选
+							</Button>
 							<Button variant="ghost" size="sm" class="h-8 text-xs" onclick={refreshQueries}>
 								<RefreshCw class="mr-1 h-3.5 w-3.5" />
 								刷新
@@ -386,11 +401,6 @@
 							>
 								AI
 							</Button>
-							{#if productUser?.role === 'admin'}
-								<Button variant="ghost" size="sm" class="h-8 text-xs" onclick={() => goto('/__admin')}>
-									管理
-								</Button>
-							{/if}
 						{/if}
 						<DropdownMenu.Root>
 							<DropdownMenu.Trigger>
@@ -438,6 +448,13 @@
 							{@render children()}
 						{/key}
 					</div>
+					{#if filterOpen && !isLoginPage}
+						<GlobalFilterDrawer
+							projectId={data.teProjectId || '51'}
+							canEdit={canEdit}
+							onClose={() => (filterOpen = false)}
+						/>
+					{/if}
 					{#if aiOpen && !isLoginPage}
 						<AiDock slug={pageSlug} onClose={() => (aiOpen = false)} />
 					{/if}

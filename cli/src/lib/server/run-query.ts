@@ -17,6 +17,8 @@ import {
 import { loadConnectionConfig, executeQuery as executeDirectQuery } from '$cli/connection';
 import { getProjectCwd } from '$lib/server/project-cwd';
 import type { Column } from '@evidence/core/user-components/interfaces/query-service';
+import { listSavedFilters, readStore } from '$lib/modules/store';
+import { injectSavedClauses } from '$lib/server/saved-clause';
 
 const STUDIO_HOST = PUBLIC_STUDIO_HOST.replace(/\/$/, '');
 
@@ -27,9 +29,102 @@ export interface RunQueryResult {
 	error?: string;
 	/** HTTP-style status hint for the `/api/query` wrapper. */
 	status?: number;
+	/** True when served from the server-side TTL cache (source is 'Cache'). */
+	cached?: boolean;
 }
 
-export async function runQuery(sql: string): Promise<RunQueryResult> {
+export interface RunQueryOpts {
+	/** Bypass the server-side TTL cache (page refresh / explicit re-run). */
+	noCache?: boolean;
+	/** Favorite keys from the saved query param. Injected before cache and execution. */
+	savedKeys?: string[];
+}
+
+type CacheEntry = {
+	at: number;
+	rows: Record<string, unknown>[];
+	columns: Column[];
+	source?: string;
+};
+
+/**
+ * Short-TTL in-memory cache for direct-connection queries (ThinkingData OpenAPI).
+ * Why here and not localStorage: page results are tiny aggregates (tens of rows),
+ * so memory is negligible; the real cost is TE round-trips on every filter change,
+ * tab switch, or multi-viewer open. Browser localStorage would add stale-data risk
+ * (no invalidation channel) and a 5MB quota shared with chat history — the client
+ * already keeps an SQL-keyed in-memory cache per page, so the server cache only
+ * needs to cover cross-viewer and cross-query repeats within a few minutes.
+ */
+const queryCache = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<RunQueryResult>>();
+const MAX_CACHE_ENTRIES = 200;
+const MAX_CACHE_ROWS = 5000;
+
+function cacheTtlMs(): number {
+	const raw = Number(process.env.TE_QUERY_CACHE_TTL_SECONDS ?? 180);
+	if (!Number.isFinite(raw) || raw <= 0) return 0;
+	return Math.min(raw, 3600) * 1000;
+}
+
+function cacheKey(sql: string, connectionType: string): string {
+	let hash = 0;
+	const key = `${connectionType}::${sql}`;
+	for (let i = 0; i < key.length; i++) {
+		hash = (hash * 31 + key.charCodeAt(i)) | 0;
+	}
+	return `${connectionType}:${hash.toString(36)}:${sql.length}`;
+}
+
+function cacheGet(key: string): CacheEntry | null {
+	const hit = queryCache.get(key);
+	if (!hit) return null;
+	if (Date.now() - hit.at > cacheTtlMs()) {
+		queryCache.delete(key);
+		return null;
+	}
+	// LRU touch
+	queryCache.delete(key);
+	queryCache.set(key, hit);
+	return hit;
+}
+
+function cacheSet(key: string, entry: CacheEntry) {
+	if (entry.rows.length > MAX_CACHE_ROWS) return;
+	queryCache.set(key, entry);
+	while (queryCache.size > MAX_CACHE_ENTRIES) {
+		const oldest = queryCache.keys().next();
+		if (oldest.done) break;
+		queryCache.delete(oldest.value);
+	}
+}
+
+export function clearQueryCache() {
+	queryCache.clear();
+}
+
+function rewriteSaved(sql: string, keys: string[] | undefined): { sql: string } | { error: string } {
+	const list = (keys ?? []).map((key) => key.trim()).filter(Boolean);
+	if (!list.length || !sql.includes('/*evd-saved*/')) return { sql };
+	const projectId = readStore().settings.te.projectId || '51';
+	const filters = listSavedFilters(projectId);
+	const clauses: string[] = [];
+	for (const key of list) {
+		if (!/^[a-z][a-z0-9_]*$/.test(key)) return { error: `非法收藏 key：${key}` };
+		const hit = filters.find((filter) => filter.key === key);
+		if (!hit) return { error: `收藏不存在：${key}` };
+		clauses.push(hit.sql);
+	}
+	return { sql: injectSavedClauses(sql, clauses) };
+}
+
+export async function runQuery(sql: string, opts?: RunQueryOpts): Promise<RunQueryResult> {
+	const rewritten = rewriteSaved(sql, opts?.savedKeys);
+	if ('error' in rewritten) {
+		return { rows: [], columns: [], error: rewritten.error, status: 400 };
+	}
+	sql = rewritten.sql;
+
 	// A broken connection.yaml should be reported, not masked by falling through.
 	let connectionConfig;
 	try {
@@ -44,8 +139,19 @@ export async function runQuery(sql: string): Promise<RunQueryResult> {
 	}
 
 	if (connectionConfig) {
-		try {
-			const result = await executeDirectQuery(sql, connectionConfig);
+		const ttl = cacheTtlMs();
+		const key = cacheKey(sql, connectionConfig.type);
+		if (ttl > 0 && !opts?.noCache) {
+			const hit = cacheGet(key);
+			if (hit) {
+				return { rows: hit.rows, columns: hit.columns, source: 'Cache', cached: true };
+			}
+			const pending = inflight.get(key);
+			if (pending) return pending;
+		}
+		const task = (async (): Promise<RunQueryResult> => {
+			try {
+				const result = await executeDirectQuery(sql, connectionConfig);
 			const source =
 				connectionConfig.type === 'snowflake'
 					? 'Snowflake'
@@ -56,15 +162,29 @@ export async function runQuery(sql: string): Promise<RunQueryResult> {
 							: connectionConfig.type === 'thinkingdata'
 								? 'ThinkingData'
 								: undefined;
-			return { rows: result.rows, columns: result.columns, source };
-		} catch (e) {
-			return {
-				rows: [],
-				columns: [],
-				error: e instanceof Error ? e.message : 'Query execution failed',
-				status: 500
-			};
+				const out: RunQueryResult = { rows: result.rows, columns: result.columns, source };
+				if (ttl > 0 && !out.error) {
+					cacheSet(key, { at: Date.now(), rows: out.rows, columns: out.columns, source: out.source });
+				}
+				return out;
+			} catch (e) {
+				return {
+					rows: [],
+					columns: [],
+					error: e instanceof Error ? e.message : 'Query execution failed',
+					status: 500
+				};
+			}
+		})();
+		if (ttl > 0 && !opts?.noCache) {
+			inflight.set(key, task);
+			try {
+				return await task;
+			} finally {
+				inflight.delete(key);
+			}
 		}
+		return task;
 	}
 
 	// No connection.yaml — fall back to managed query engine.

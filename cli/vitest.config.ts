@@ -8,6 +8,9 @@ const coreShims = path.resolve(import.meta.dirname, '../core/src/shims');
 
 export default defineConfig({
 	plugins: [svelte()],
+	define: {
+		__DEFAULT_QUERY_ENGINE_HOST__: JSON.stringify('')
+	},
 	resolve: {
 		conditions: ['svelte'],
 		alias: {

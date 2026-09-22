@@ -12,17 +12,18 @@ import { runQuery } from '$lib/server/run-query';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const body = await request.json();
-	const { sql } = body;
+	const { sql, noCache, saved } = body;
 
 	if (!sql || typeof sql !== 'string') {
 		throw error(400, 'Missing sql parameter');
 	}
 
-	const result = await runQuery(sql);
+	const savedKeys = Array.isArray(saved) ? saved.map((key: unknown) => String(key)) : [];
+	const result = await runQuery(sql, { noCache: noCache === true, savedKeys });
 
 	if (result.error) {
 		return json({ error: result.error }, { status: result.status ?? 500 });
 	}
 
-	return json({ rows: result.rows, columns: result.columns, source: result.source });
+	return json({ rows: result.rows, columns: result.columns, source: result.source, cached: result.cached ?? false });
 };

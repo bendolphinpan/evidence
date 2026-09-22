@@ -31,10 +31,17 @@ export class CLIQueryService implements QueryService {
 		opts?: QueryOpts
 	): Promise<QueryResult<RowType>> {
 		try {
+			const saved =
+				typeof window === 'undefined'
+					? []
+					: (new URLSearchParams(window.location.search).get('saved') || '')
+							.split(',')
+							.map((key) => key.trim())
+							.filter(Boolean);
 			const response = await fetch('/api/query', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ sql }),
+				body: JSON.stringify({ sql, noCache: opts?.noCache === true, saved }),
 				signal: opts?.signal
 			});
 

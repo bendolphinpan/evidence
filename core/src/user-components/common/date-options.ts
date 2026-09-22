@@ -674,6 +674,24 @@ export interface ParsedDateRange {
 	startDateFunction?: string; // ClickHouse function for calculating start date in "to date" formats
 }
 
+/** A single range boundary: a calendar date, today/yesterday, or "N days/weeks/months ago". */
+const AGO_BOUNDARY_RE = /^(\d{1,4}) (day|week|month)s? ago$/i;
+
+function resolveBoundaryDate(tok: string, today: Date): Date {
+	const t = tok.toLowerCase();
+	if (t === 'today') return today;
+	if (t === 'yesterday') return subDays(today, 1);
+	const ago = t.match(AGO_BOUNDARY_RE);
+	if (ago) {
+		const n = Number(ago[1]);
+		const unit = ago[2].toLowerCase();
+		if (unit === 'week') return subWeeks(today, n);
+		if (unit === 'month') return subMonths(today, n);
+		return subDays(today, n);
+	}
+	return new Date(`${tok}T00:00:00`);
+}
+
 /**
  * Parses a date range string into structured metadata for date calculations.
  * Handles predefined presets, explicit date ranges, and dynamic patterns with case-insensitive matching.
@@ -694,11 +712,7 @@ export function parseDateRange(
 		new RegExp(`^(?:from )?(${DATE_BOUNDARY_TOKEN}) to (${DATE_BOUNDARY_TOKEN})$`, 'i')
 	);
 	if (explicitMatch) {
-		const resolveBoundary = (boundary: string) => {
-			if (boundary.toLowerCase() === 'today') return today;
-			if (boundary.toLowerCase() === 'yesterday') return subDays(today, 1);
-			return new Date(`${boundary}T00:00:00`);
-		};
+		const resolveBoundary = (boundary: string) => resolveBoundaryDate(boundary, today);
 		const startDate = resolveBoundary(explicitMatch[1]);
 		const endDate = resolveBoundary(explicitMatch[2]);
 		const daysDiff = differenceInCalendarDays(endDate, startDate) + 1;
@@ -861,8 +875,9 @@ export function parseDateRange(
 	}
 }
 
-/** A boundary in from/until/closed ranges: a literal YYYY-MM-DD, or the dynamic tokens "today"/"yesterday". */
-export const DATE_BOUNDARY_TOKEN = '\\d{4}-\\d{2}-\\d{2}|today|yesterday';
+/** A boundary in from/until/closed ranges: YYYY-MM-DD, today/yesterday, or "N days/weeks/months ago". */
+export const DATE_BOUNDARY_TOKEN =
+	'\\d{4}-\\d{2}-\\d{2}|today|yesterday|\\d{1,4} days? ago|\\d{1,4} weeks? ago|\\d{1,4} months? ago';
 
 // Literal tokens parseDateRange matches explicitly. Preset keys like "last 7 days" are
 // covered by the previous/last regexes below; the "all" shorthand is deliberately absent
@@ -947,10 +962,8 @@ export function resolveRangeToDates(
 	if (!range || range.toLowerCase() === 'all time') return undefined;
 
 	const resolveDateToken = (tok: string) => {
-		const t = tok.toLowerCase();
-		if (t === 'today') return format(today, 'yyyy-MM-dd');
-		if (t === 'yesterday') return format(subDays(today, 1), 'yyyy-MM-dd');
-		return tok;
+		if (/^\d{4}-\d{2}-\d{2}$/.test(tok)) return tok;
+		return format(resolveBoundaryDate(tok, today), 'yyyy-MM-dd');
 	};
 
 	// Specific closed-ended range. A leading "from" is accepted ("from X to Y" == "X to Y") so the

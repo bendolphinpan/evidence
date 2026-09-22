@@ -8,6 +8,7 @@ import {
 	appendAudit,
 	appendChat,
 	getChat,
+	listSavedFilters,
 	readStore,
 	searchSqlKb,
 	upsertSqlKb,
@@ -303,7 +304,7 @@ ${agents || '见 platform/AGENTS.md'}
 ## 当前页 markdown
 ${pageMd.slice(0, 5000)}
 
-流程：wiki_lookup / search_sql_kb → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。
+流程：wiki_lookup / search_sql_kb / search_saved_filters → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。收藏条件由顶栏筛选抽屉套用：页内 SQL 留 `AND /*evd-saved*/ 1 = 1`，不要再写 saved dropdown 或按 key 分支。用户要新建收藏时告诉他去顶栏筛选里点「收藏」。
 禁止 FROM 查询别名。不要输出 Token。`;
 }
 
@@ -349,6 +350,18 @@ const TOOLS = [
 		function: {
 			name: 'search_sql_kb',
 			description: '按事件/指标指纹搜索本项目已成功跑通的 SQL 预览',
+			parameters: {
+				type: 'object',
+				properties: { query: { type: 'string' } },
+				required: ['query']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'search_saved_filters',
+			description: '查当前项目收藏筛选库：key、名字、描述、SQL 条件。用户说“用收藏XX筛选”时调用。套用靠地址栏 ?saved=key 和页内 AND /*evd-saved*/ 1 = 1，不要在页里按 key 写分支。',
 			parameters: {
 				type: 'object',
 				properties: { query: { type: 'string' } },
@@ -490,6 +503,19 @@ async function runTool(
 			projectId,
 			hits: searchSqlKb(projectId, String(args.query || ''))
 		});
+	}
+	if (name === 'search_saved_filters') {
+		const q = String(args.query || '').trim().toLowerCase();
+		const hits = listSavedFilters(projectId)
+			.filter(
+				(f) =>
+					!q ||
+					f.name.toLowerCase().includes(q) ||
+					(f.description || '').toLowerCase().includes(q) ||
+					f.sql.toLowerCase().includes(q)
+			)
+			.slice(0, 10);
+		return JSON.stringify({ projectId, hits });
 	}
 	if (name === 'read_page') {
 		const md = readPageMarkdown(String(args.slug || ''));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coarserGrain } from './date-options';
+import { coarserGrain, isRecognizedDateRange, processDateRange } from './date-options';
 
 describe('coarserGrain', () => {
 	it('returns the coarser of two temporal grains', () => {
@@ -32,5 +32,24 @@ describe('coarserGrain', () => {
 
 	it('handles same-grain inputs deterministically', () => {
 		expect(coarserGrain('month', 'month')).toBe('month');
+	});
+});
+
+describe('mixed absolute and relative boundaries', () => {
+	const today = new Date(2026, 8, 22);
+
+	it('resolves a static start and a dynamic end independently', () => {
+		expect(isRecognizedDateRange('2026-09-18 to 1 days ago')).toBe(true);
+		const processed = processDateRange('2026-09-18 to 1 days ago', '"$part_date"', today);
+		expect(processed.startDate).toBe('2026-09-18');
+		expect(processed.endDate).toBe('2026-09-21');
+		expect(processed.betweenFragment).toContain('2026-09-18');
+		expect(processed.betweenFragment).toContain('2026-09-21');
+	});
+
+	it('treats 0 days ago as today and rejects nothing for a same-day window', () => {
+		const processed = processDateRange('0 days ago to today', undefined, today);
+		expect(processed.startDate).toBe('2026-09-22');
+		expect(processed.endDate).toBe('2026-09-22');
 	});
 });
