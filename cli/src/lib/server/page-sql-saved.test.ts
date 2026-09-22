@@ -21,6 +21,7 @@ function pageQueries(slug: string): { name: string; sql: string }[] {
 }
 
 const PAGES: Record<string, string[]> = {
+	dau: ['dau', 'dnu'],
 	purchase: ['purchase_end', 'buy_enter'],
 	'ads-show': ['ads_funnel'],
 	'level-fail': ['level_funnel', 'progress_distribution'],

@@ -24,6 +24,19 @@ export function readPageMarkdown(slug: string): string | null {
 	return readFileSync(file, 'utf8');
 }
 
+export function pageExists(slug: string): boolean {
+	const file = resolvePageFile(slug);
+	return !!file && existsSync(file);
+}
+
+export function createPageMarkdown(
+	slug: string,
+	markdown: string
+): { ok: true } | { error: string } {
+	if (pageExists(slug)) return { error: '这个路径已经有页面' };
+	return writePageMarkdown(slug, markdown);
+}
+
 export function writePageMarkdown(slug: string, markdown: string): { ok: true } | { error: string } {
 	const file = resolvePageFile(slug);
 	if (!file) return { error: '无效路径' };

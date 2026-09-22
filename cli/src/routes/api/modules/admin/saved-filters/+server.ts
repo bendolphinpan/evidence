@@ -6,6 +6,7 @@ import {
 	listSavedFilters,
 	updateSavedFilter
 } from '$lib/modules/store';
+import { clearQueryCache } from '$lib/server/run-query';
 
 function projectIdOf(url: URL, body?: { projectId?: unknown }): string {
 	const q = String(url.searchParams.get('projectId') || '').trim();
@@ -35,6 +36,7 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 		createdBy: locals.productUser.username
 	});
 	if ('error' in result) return json({ error: result.error }, { status: 400 });
+	clearQueryCache();
 	return json({ filter: result });
 };
 
@@ -50,6 +52,7 @@ export const PUT: RequestHandler = async ({ locals, request }) => {
 		sql: body.sql !== undefined ? String(body.sql) : undefined
 	});
 	if ('error' in result) return json({ error: result.error }, { status: 400 });
+	clearQueryCache();
 	return json({ filter: result });
 };
 
@@ -60,5 +63,6 @@ export const DELETE: RequestHandler = async ({ locals, request }) => {
 	if (!id) return json({ error: '缺少 id' }, { status: 400 });
 	const result = deleteSavedFilter(id);
 	if ('error' in result) return json({ error: result.error }, { status: 400 });
+	clearQueryCache();
 	return json({ ok: true });
 };

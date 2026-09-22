@@ -29,6 +29,7 @@
 	import { goto } from '$app/navigation';
 	import AiDock from '$lib/modules/AiDock.svelte';
 	import NewPageButton from '$lib/modules/NewPageButton.svelte';
+	import { setAnalysisProject } from '$lib/modules/analysis-context';
 	import GlobalFilterDrawer from '$lib/modules/GlobalFilterDrawer.svelte';
 	import { createFullscreen } from '@evidence/core/utils/fullscreen.svelte';
 	import { ModeWatcher, mode, toggleMode } from 'mode-watcher';
@@ -82,6 +83,17 @@
 	const fs = createFullscreen();
 
 	const navTree = $derived(buildNavTreeFromFlat(data.navItems));
+	const globalQuery = $derived.by(() => {
+		const keep = new URLSearchParams();
+		for (const key of ['dates', 'saved']) {
+			const value = page.url.searchParams.get(key);
+			if (value) keep.set(key, value);
+		}
+		return keep.toString();
+	});
+	$effect(() => {
+		setAnalysisProject(data.teProjectId || '51');
+	});
 
 	// Dev poll: user content is read at runtime, not in Vite's module graph, so HMR can't see it.
 	// Serve mode ships immutable content (restart to refresh), so no poll.
@@ -219,7 +231,7 @@
 									{/if}
 								{:else}
 									<Sidebar.Group>
-										<PageNavTree tree={navTree} currentPath={page.url.pathname} />
+										<PageNavTree tree={navTree} currentPath={page.url.pathname} query={globalQuery} />
 										{#if canEdit}
 											<Sidebar.MenuItem>
 												<NewPageButton projectId={data.teProjectId || '51'} />
@@ -305,7 +317,7 @@
 										<DropdownMenu.Separator />
 									{:else}
 										<DropdownMenu.Label class="text-muted-foreground text-xs font-normal">
-											To log in, run <code class="bg-muted rounded px-1">evidence login</code>
+											请先登录
 										</DropdownMenu.Label>
 										<DropdownMenu.Separator />
 									{/if}
@@ -326,7 +338,7 @@
 										{/if}
 									</DropdownMenu.Item>
 
-									{#if data.organizations && data.organizations.length > 1}
+									{#if !productUser && data.organizations && data.organizations.length > 1}
 										<DropdownMenu.Separator />
 										<DropdownMenu.Label class="text-muted-foreground text-xs font-normal"
 											>Organizations</DropdownMenu.Label
@@ -414,7 +426,7 @@
 									{#snippet child({ props })}
 										<div class="flex w-full items-center gap-2" {...props}>
 											<FileText class="size-3 shrink-0" />
-											<span>Download PDF</span>
+											<span>下载 PDF</span>
 										</div>
 									{/snippet}
 								</DropdownMenu.Item>
@@ -422,7 +434,7 @@
 									{#snippet child({ props })}
 										<div class="flex w-full items-center gap-2" {...props}>
 											<ImageIcon class="size-3 shrink-0" />
-											<span>Download Image</span>
+											<span>下载图片</span>
 										</div>
 									{/snippet}
 								</DropdownMenu.Item>
@@ -434,7 +446,7 @@
 									{#snippet child({ props })}
 										<div class="flex w-full items-center gap-2" {...props}>
 											<Fullscreen class="size-3 shrink-0" />
-											<span>Fullscreen</span>
+											<span>全屏</span>
 										</div>
 									{/snippet}
 								</DropdownMenu.Item>

@@ -17,6 +17,8 @@ import { SIDEBAR_WIDTH_COOKIE_NAME } from '@evidence/core/shadcn/components/ui/s
 import { getTranslationLanguages } from '$lib/server/translations.server';
 import type { WarehouseType } from '@evidence/core/sql-dialect';
 import { modulesEnabled, readStore } from '$lib/modules/store';
+import { readPageMarkdown } from '$lib/modules/pages';
+import { resolveActiveProject } from '$lib/modules/ai-chat';
 const PUBLIC_STUDIO_HOST = process.env.PUBLIC_STUDIO_HOST ?? 'https://evidence.studio';
 
 const STUDIO_HOST = PUBLIC_STUDIO_HOST.replace(/\/$/, '');
@@ -95,7 +97,11 @@ export const load: LayoutServerLoad = async ({ url, cookies, locals }) => {
 		organizations = orgInfo.organizations;
 	}
 
-	const teProjectId = readStore().settings.te.projectId || process.env.TE_PROJECT_ID || '51';
+	const fallbackProject = readStore().settings.te.projectId || process.env.TE_PROJECT_ID || '51';
+	const pageSlug = url.pathname === '/' ? 'index' : url.pathname.replace(/^\//, '');
+	const pageMd =
+		url.pathname.startsWith('/__') || url.pathname === '/login' ? null : readPageMarkdown(pageSlug);
+	const teProjectId = pageMd ? resolveActiveProject(pageMd) : fallbackProject;
 
 	return {
 		navItems,

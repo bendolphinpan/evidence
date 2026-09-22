@@ -51,20 +51,18 @@ export async function createReportPage(input: {
 	if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
 		return { error: '路径只允许小写字母、数字和连字符，并且以字母开头' };
 	}
-	const existing = await fetch(`/api/modules/pages/${slug}`);
-	if (existing.status !== 404) {
-		if (existing.ok) await fetch(`/api/modules/pages/${slug}`, { method: 'DELETE' });
-		return { error: '这个路径已经有页面' };
-	}
-	const res = await fetch(`/api/modules/pages/${slug}`, {
-		method: 'PUT',
+	const res = await fetch('/api/modules/pages/create', {
+		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
+			slug,
+			title,
+			projectId: input.projectId,
+			schema: input.schema,
 			markdown: starterMarkdown({ slug, title, projectId: input.projectId, schema: input.schema })
 		})
 	});
 	const json = await res.json().catch(() => ({}));
 	if (!res.ok) return { error: json.error || '创建失败' };
-	await fetch(`/api/modules/pages/${slug}`, { method: 'DELETE' });
-	return { href: slug === 'index' ? '/' : `/${slug}` };
+	return { href: json.href || (slug === 'index' ? '/' : `/${slug}`) };
 }

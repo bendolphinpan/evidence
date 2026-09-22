@@ -304,7 +304,7 @@ ${agents || '见 platform/AGENTS.md'}
 ## 当前页 markdown
 ${pageMd.slice(0, 5000)}
 
-流程：wiki_lookup / search_sql_kb / search_saved_filters → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。收藏条件由顶栏筛选抽屉套用：页内 SQL 留 `AND /*evd-saved*/ 1 = 1`，不要再写 saved dropdown 或按 key 分支。用户要新建收藏时告诉他去顶栏筛选里点「收藏」。
+流程：wiki_lookup / search_sql_kb / search_saved_filters → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。收藏条件由顶栏筛选抽屉套用：页内 SQL 留 AND /*evd-saved*/ 1 = 1，不要再写 saved dropdown 或按 key 分支。用户要新建收藏时告诉他去顶栏筛选里点「收藏」。
 禁止 FROM 查询别名。不要输出 Token。`;
 }
 
@@ -485,6 +485,9 @@ async function runTool(
 	user: PublicUser,
 	projectId: string
 ): Promise<string> {
+	if (user.role === 'viewer' && !['wiki_lookup', 'read_page'].includes(name)) {
+		return JSON.stringify({ error: 'viewer 只能查口径和读页面' });
+	}
 	if (name === 'run_sql') {
 		const sql = interpolateEvidenceSql(String(args.sql || ''));
 		const result = await runQuery(sql);
@@ -600,7 +603,11 @@ export async function productChat(input: {
 
 	let reply = '';
 	for (let round = 0; round < maxRounds; round++) {
-		const msg = await complete({ tools: TOOLS });
+		const tools =
+			input.user.role === 'viewer'
+				? TOOLS.filter((tool) => ['wiki_lookup', 'read_page'].includes(tool.function.name))
+				: TOOLS;
+		const msg = await complete({ tools });
 		const calls = msg.tool_calls;
 		if (!calls?.length) {
 			reply = msg.content || (patched ? '已按你的要求改页。' : '（无内容）');

@@ -5,7 +5,17 @@
 	import { loadLucideIcon } from '../user-components/common/dynamic-icon';
 	import { type NavTree, type NavDirectory, type NavPage } from '../utils/nav-tree';
 
-	let { tree, currentPath }: { tree: NavTree; currentPath: string } = $props();
+	let {
+		tree,
+		currentPath,
+		query = ''
+	}: { tree: NavTree; currentPath: string; query?: string } = $props();
+
+	function hrefOf(href: string): string {
+		if (!query) return href;
+		const base = href.split('?')[0];
+		return `${base}?${query}`;
+	}
 
 	// Per-directory collapse state. Default: expanded when it contains the
 	// active page, collapsed otherwise. Once the user toggles a directory we
@@ -48,7 +58,7 @@
 		<Sidebar.MenuItem>
 			<Sidebar.MenuButton {isActive}>
 				{#snippet child({ props })}
-					<a href={navPage.href} {...props}>
+					<a href={hrefOf(navPage.href)} {...props}>
 						{@render pageIcon(navPage, isActive)}
 						<Ellipsis class="w-full cursor-pointer">
 							{navPage.name}
@@ -82,7 +92,7 @@
 						{@const isActive = navPage.href === currentPath}
 						<Sidebar.MenuButton {isActive}>
 							{#snippet child({ props })}
-								<a href={navPage.href} {...props}>
+								<a href={hrefOf(navPage.href)} {...props}>
 									{@render pageIcon(navPage, isActive)}
 									<Ellipsis class="w-full cursor-pointer">
 										{navPage.name}

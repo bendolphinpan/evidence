@@ -28,15 +28,18 @@
 	let filterForm = $state({ id: '', key: '', name: '', description: '', sql: '' });
 	let pageForm = $state({ slug: '', title: '' });
 	let creatingPage = $state(false);
+	let audit = $state<{ at: string; username: string; action: string; slug: string; detail: string }[]>([]);
 	const navItems = $derived(
 		(page.data.navItems ?? []) as { slug: string; title?: string; isHome?: boolean }[]
 	);
 
 	async function reload() {
-		const [u, s] = await Promise.all([
+		const [u, s, a] = await Promise.all([
 			fetch('/api/modules/admin/users'),
-			fetch('/api/modules/admin/settings')
+			fetch('/api/modules/admin/settings'),
+			fetch('/api/modules/admin/audit')
 		]);
+		if (a.ok) audit = (await a.json()).audit || [];
 		if (u.ok) users = (await u.json()).users;
 		if (s.ok) {
 			const json = await s.json();
@@ -164,6 +167,27 @@
 			<p class="mt-3 text-sm">{message}</p>
 		{/if}
 	</div>
+
+	<Card.Root class="py-4">
+		<Card.Header class="px-6">
+			<Card.Title class="text-base">审计</Card.Title>
+			<Card.Description>最近的建页和 AI 改页。</Card.Description>
+		</Card.Header>
+		<Card.Content class="px-6">
+			{#if audit.length === 0}
+				<p class="text-muted-foreground text-xs">还没有记录。</p>
+			{/if}
+			<ul class="space-y-1 text-xs">
+				{#each audit as row (`${row.at}-${row.slug}-${row.action}`)}
+					<li>
+						<span class="font-mono">{row.at.slice(0, 19)}</span>
+						{row.username} {row.action} {row.slug}
+						<span class="text-muted-foreground">{row.detail}</span>
+					</li>
+				{/each}
+			</ul>
+		</Card.Content>
+	</Card.Root>
 
 	<Card.Root class="py-4">
 		<Card.Header class="px-6">

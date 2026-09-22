@@ -12,6 +12,7 @@ import type {
 	AnyRowType
 } from '@evidence/core/user-components/interfaces/query-service';
 import { dialectFor, type SqlDialect, type WarehouseType } from '@evidence/core/sql-dialect';
+import { getAnalysisProject } from '$lib/modules/analysis-context';
 
 export type ConnectionType = WarehouseType | null;
 
@@ -41,7 +42,12 @@ export class CLIQueryService implements QueryService {
 			const response = await fetch('/api/query', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ sql, noCache: opts?.noCache === true, saved }),
+				body: JSON.stringify({
+					sql,
+					noCache: opts?.noCache === true,
+					saved,
+					projectId: getAnalysisProject()
+				}),
 				signal: opts?.signal
 			});
 

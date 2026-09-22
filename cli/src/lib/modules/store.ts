@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { getProjectCwd } from '$lib/server/project-cwd';
+import { validateSavedPredicate } from '$lib/server/saved-predicate';
 
 export type Role = 'admin' | 'editor' | 'viewer';
 
@@ -74,6 +75,8 @@ export type SavedFilter = {
 	name: string;
 	description: string;
 	sql: string;
+	/** Table aliases the predicate needs, e.g. ["e"] or ["e","u"]. */
+	aliases: string[];
 	createdBy: string;
 	updatedAt: string;
 };
@@ -87,6 +90,7 @@ export type AppState = {
 	sqlKb: SqlKbRecord[];
 	auditLog: AuditRecord[];
 	savedFilters: SavedFilter[];
+	revision: number;
 };
 
 const EMPTY: AppState = {
@@ -100,7 +104,8 @@ const EMPTY: AppState = {
 	chats: [],
 	sqlKb: [],
 	auditLog: [],
-	savedFilters: []
+	savedFilters: [],
+	revision: 0
 };
 
 const MAX_CHAT_TURNS = 40; // 20 rounds
@@ -114,60 +119,110 @@ export function storePath(): string {
 	return resolve(cwd, 'data', 'self-data.json');
 }
 
+export class StoreCorruptError extends Error {
+	constructor(path: string) {
+		super(`状态文件损坏，已拒绝写回：${path}`);
+		this.name = 'StoreCorruptError';
+	}
+}
+
 function readState(): AppState {
+	const loaded = loadState();
+	if (loaded.corrupt) throw new StoreCorruptError(storePath());
+	return loaded.state;
+}
+
+function loadState(): { state: AppState; corrupt: boolean } {
 	const file = storePath();
-	if (!existsSync(file)) return structuredClone(EMPTY);
+	if (!existsSync(file)) return { state: structuredClone(EMPTY), corrupt: false };
+	let text = '';
 	try {
-		const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<AppState>;
+		text = readFileSync(file, 'utf8');
+		const raw = JSON.parse(text) as Partial<AppState>;
+		if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+			return { state: structuredClone(EMPTY), corrupt: true };
+		}
 		return {
-			users: Array.isArray(raw.users) ? raw.users : [],
-			sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
-			pageLocks: Array.isArray(raw.pageLocks) ? raw.pageLocks : [],
-			settings: {
-				te: { ...EMPTY.settings.te, ...(raw.settings?.te || {}) },
-				ai: { ...EMPTY.settings.ai, ...(raw.settings?.ai || {}) }
-			},
-			chats: Array.isArray(raw.chats) ? raw.chats : [],
-			sqlKb: Array.isArray(raw.sqlKb) ? raw.sqlKb : [],
-			auditLog: Array.isArray(raw.auditLog) ? raw.auditLog : [],
-			savedFilters: Array.isArray(raw.savedFilters) ? raw.savedFilters : []
+			corrupt: false,
+			state: {
+				users: Array.isArray(raw.users) ? raw.users : [],
+				sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
+				pageLocks: Array.isArray(raw.pageLocks) ? raw.pageLocks : [],
+				settings: {
+					te: { ...EMPTY.settings.te, ...(raw.settings?.te || {}) },
+					ai: { ...EMPTY.settings.ai, ...(raw.settings?.ai || {}) }
+				},
+				chats: Array.isArray(raw.chats) ? raw.chats : [],
+				sqlKb: Array.isArray(raw.sqlKb) ? raw.sqlKb : [],
+				auditLog: Array.isArray(raw.auditLog) ? raw.auditLog : [],
+				savedFilters: Array.isArray(raw.savedFilters) ? raw.savedFilters : [],
+				revision: Number(raw.revision) || 0
+			}
 		};
 	} catch {
-		return structuredClone(EMPTY);
+		return { state: structuredClone(EMPTY), corrupt: text.trim().length > 0 };
 	}
 }
 
 function writeState(state: AppState): void {
 	const file = storePath();
 	mkdirSync(dirname(file), { recursive: true });
+	if (existsSync(file)) {
+		try {
+			copyFileSync(file, `${file}.bak`);
+		} catch {
+			// backup is best-effort; the write still goes through a temp file
+		}
+	}
 	const tmp = `${file}.${process.pid}.tmp`;
 	writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
 	renameSync(tmp, file);
 }
 
-export function withStore<T>(fn: (state: AppState) => T): T {
-	const beforeMtime = (() => {
+function sleep(ms: number) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withFileLock<T>(fn: () => T): T {
+	const lock = `${storePath()}.lock`;
+	mkdirSync(dirname(lock), { recursive: true });
+	const start = Date.now();
+	let fd: number | null = null;
+	while (fd === null) {
 		try {
-			return existsSync(storePath()) ? readFileSync(storePath(), 'utf8').length : -1;
+			fd = openSync(lock, 'wx');
 		} catch {
-			return -1;
+			if (Date.now() - start > 5000) throw new Error('状态文件锁超时');
+			sleep(20);
 		}
-	})();
-	const state = readState();
-	const result = fn(state);
-	const afterLen = (() => {
-		try {
-			return existsSync(storePath()) ? readFileSync(storePath(), 'utf8').length : -1;
-		} catch {
-			return -1;
-		}
-	})();
-	if (beforeMtime !== -1 && afterLen !== beforeMtime) {
-		// Another writer may have landed; re-read once and re-apply is too hard for arbitrary fn.
-		// Best-effort: still write our state (last writer wins) but keep truncation guards.
 	}
-	writeState(state);
-	return result;
+	try {
+		return fn();
+	} finally {
+		closeSync(fd);
+		try {
+			unlinkSync(lock);
+		} catch {
+			// another waiter may already have recreated it
+		}
+	}
+}
+
+export function withStore<T>(fn: (state: AppState) => T): T {
+	return withFileLock(() => {
+		const loaded = loadState();
+		if (loaded.corrupt) throw new StoreCorruptError(storePath());
+		const seen = loaded.state.revision || 0;
+		const result = fn(loaded.state);
+		const again = loadState();
+		if (again.corrupt) throw new StoreCorruptError(storePath());
+		if ((again.state.revision || 0) !== seen) {
+			throw new Error('状态文件在写入前已变化，请重试');
+		}
+		loaded.state.revision = seen + 1;
+		writeState(loaded.state);
+		return result;
+	});
 }
 
 export function readStore(): AppState {
@@ -244,6 +299,10 @@ export function searchSqlKb(projectId: string, query: string): SqlKbRecord[] {
 		.slice(0, 8);
 }
 
+export function listAudit(limit = 30): AuditRecord[] {
+	return readStore().auditLog.slice(0, limit);
+}
+
 export function appendAudit(entry: Omit<AuditRecord, 'at'> & { at?: string }) {
 	withStore((state) => {
 		state.auditLog.unshift({ ...entry, at: entry.at || new Date().toISOString() });
@@ -260,43 +319,45 @@ function sanitizeSavedFilter(input: {
 	name: string;
 	description: string;
 	sql: string;
-}): { key: string; name: string; description: string; sql: string } | { error: string } {
+}): { key: string; name: string; description: string; sql: string; aliases: string[] } | { error: string } {
 	const key = String(input.key || '')
 		.trim()
 		.toLowerCase()
 		.slice(0, 40);
 	const name = String(input.name || '').trim().slice(0, 60);
 	const description = String(input.description || '').trim().slice(0, 300);
-	const sql = String(input.sql || '').trim().slice(0, 2000);
 	if (!key) return { error: '收藏需要 key（页内分支用）' };
 	if (!/^[a-z][a-z0-9_]*$/.test(key)) return { error: 'key 只允许小写字母/数字/下划线，字母开头' };
 	if (key === 'none') return { error: 'key 不能叫 none（保留值）' };
 	if (!name) return { error: '收藏需要名字' };
-	if (!sql) return { error: '收藏需要 SQL 条件' };
-	if (/;\s*\S/.test(sql)) return { error: '只允许单个布尔条件，不要写多语句' };
-	if (
-		/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|REPLACE|INTO\s+OUTFILE)\b/i.test(
-			sql
-		)
-	) {
-		return { error: '只允许布尔条件，不要写写库语句' };
-	}
-	return { key, name, description, sql };
+	const predicate = validateSavedPredicate(input.sql);
+	if ('error' in predicate) return predicate;
+	return { key, name, description, sql: predicate.sql, aliases: predicate.aliases };
 }
+
+const BUILTIN_NOTEST: SavedFilter = {
+	id: 'builtin-notest',
+	key: 'notest',
+	projectId: '51',
+	name: '排除测试流量',
+	description: '只去掉事件表测试包，不是真实用户口径。真实用户用页内对象筛选。',
+	sql: 'coalesce(e.is_test, false) = false',
+	aliases: ['e'],
+	createdBy: 'system',
+	updatedAt: ''
+};
 
 export function listSavedFilters(projectId: string): SavedFilter[] {
 	const state = readState();
-	const rows = state.savedFilters.filter((f) => f.projectId === projectId);
-	if (rows.length === 0 && projectId === '51') {
-		const seeded = addSavedFilter({
-			projectId: '51',
-			key: 'notest',
-			name: '排除测试流量',
-			description: '去掉事件表 e.is_test。各页事件表别名固定为 e。',
-			sql: 'coalesce(e.is_test, false) = false',
-			createdBy: 'system'
+	const rows = state.savedFilters
+		.filter((f) => f.projectId === projectId)
+		.map((filter) => {
+			if (filter.aliases?.length) return filter;
+			const parsed = validateSavedPredicate(filter.sql);
+			return 'error' in parsed ? { ...filter, aliases: [] } : { ...filter, aliases: parsed.aliases };
 		});
-		if (!('error' in seeded)) return [seeded];
+	if (projectId === '51' && !rows.some((filter) => filter.key === 'notest')) {
+		rows.push(BUILTIN_NOTEST);
 	}
 	return rows;
 }
@@ -357,6 +418,7 @@ export function updateSavedFilter(
 }
 
 export function deleteSavedFilter(id: string): { ok: true } | { error: string } {
+	if (id.startsWith('builtin-')) return { error: '内置条件不能删除' };
 	return withStore((state) => {
 		const before = state.savedFilters.length;
 		state.savedFilters = state.savedFilters.filter((f) => f.id !== id);

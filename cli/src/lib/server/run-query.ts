@@ -15,10 +15,12 @@ import {
 	clearSessionCache
 } from '$lib/auth/credentials.server';
 import { loadConnectionConfig, executeQuery as executeDirectQuery } from '$cli/connection';
+import { createHash } from 'node:crypto';
 import { getProjectCwd } from '$lib/server/project-cwd';
 import type { Column } from '@evidence/core/user-components/interfaces/query-service';
 import { listSavedFilters, readStore } from '$lib/modules/store';
 import { injectSavedClauses } from '$lib/server/saved-clause';
+import { predicateFitsQuery } from '$lib/server/saved-predicate';
 
 const STUDIO_HOST = PUBLIC_STUDIO_HOST.replace(/\/$/, '');
 
@@ -38,6 +40,8 @@ export interface RunQueryOpts {
 	noCache?: boolean;
 	/** Favorite keys from the saved query param. Injected before cache and execution. */
 	savedKeys?: string[];
+	/** Active page project. Falls back to settings only when omitted. */
+	projectId?: string;
 }
 
 type CacheEntry = {
@@ -68,12 +72,7 @@ function cacheTtlMs(): number {
 }
 
 function cacheKey(sql: string, connectionType: string): string {
-	let hash = 0;
-	const key = `${connectionType}::${sql}`;
-	for (let i = 0; i < key.length; i++) {
-		hash = (hash * 31 + key.charCodeAt(i)) | 0;
-	}
-	return `${connectionType}:${hash.toString(36)}:${sql.length}`;
+	return createHash('sha256').update(`${connectionType}::${sql}`).digest('hex');
 }
 
 function cacheGet(key: string): CacheEntry | null {
@@ -103,23 +102,29 @@ export function clearQueryCache() {
 	queryCache.clear();
 }
 
-function rewriteSaved(sql: string, keys: string[] | undefined): { sql: string } | { error: string } {
+function rewriteSaved(
+	sql: string,
+	keys: string[] | undefined,
+	projectId: string | undefined
+): { sql: string } | { error: string } {
 	const list = (keys ?? []).map((key) => key.trim()).filter(Boolean);
 	if (!list.length || !sql.includes('/*evd-saved*/')) return { sql };
-	const projectId = readStore().settings.te.projectId || '51';
-	const filters = listSavedFilters(projectId);
+	const active = projectId || readStore().settings.te.projectId || '51';
+	const filters = listSavedFilters(active);
 	const clauses: string[] = [];
 	for (const key of list) {
 		if (!/^[a-z][a-z0-9_]*$/.test(key)) return { error: `非法收藏 key：${key}` };
 		const hit = filters.find((filter) => filter.key === key);
 		if (!hit) return { error: `收藏不存在：${key}` };
+		const fit = predicateFitsQuery(hit.aliases || [], sql);
+		if (fit) return { error: `${hit.name}：${fit}` };
 		clauses.push(hit.sql);
 	}
 	return { sql: injectSavedClauses(sql, clauses) };
 }
 
 export async function runQuery(sql: string, opts?: RunQueryOpts): Promise<RunQueryResult> {
-	const rewritten = rewriteSaved(sql, opts?.savedKeys);
+	const rewritten = rewriteSaved(sql, opts?.savedKeys, opts?.projectId);
 	if ('error' in rewritten) {
 		return { rows: [], columns: [], error: rewritten.error, status: 400 };
 	}
