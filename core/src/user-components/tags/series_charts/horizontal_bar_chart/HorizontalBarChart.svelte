@@ -466,7 +466,10 @@
 								String(r[yColumnName]) === category && String(r[seriesColumnName]) === seriesValue
 						);
 						if (!row) return null;
-						const v = Number(row[xColumnName]);
+						const raw = row[xColumnName];
+						if (raw === null || raw === undefined || raw === '') return null;
+						const v = Number(raw);
+						if (!Number.isFinite(v)) return null;
 						if (!hasExtras) return v;
 						return { value: v, extras: extractTooltipExtras(row, tooltipFields) };
 					})
@@ -492,6 +495,7 @@
 						rotate: dataLabels.rotate,
 						formatter: (params: { value?: number | null }) => {
 							const value = params.value;
+							if (value === null || value === undefined) return '';
 							return formatValue(value, dataLabels.fmt ?? x_fmt, value?.toString(), minMax);
 						}
 					},
@@ -529,6 +533,7 @@
 						// @ts-expect-error - ECharts type expects broader callback signature for label formatter
 						formatter: (params: { value?: number | null }) => {
 							const value = params.value;
+							if (value === null || value === undefined) return '';
 							return formatValue(value, dataLabels.fmt ?? x_fmt, value?.toString(), minMax);
 						}
 					},

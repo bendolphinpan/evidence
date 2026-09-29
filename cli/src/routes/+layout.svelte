@@ -490,5 +490,18 @@
 		:global([data-slot='sidebar']) {
 			display: none !important;
 		}
+		/* filter_bar is sticky while browsing; force document flow in print so it
+		   does not float over body text on every PDF page. */
+		:global([data-evidence-filter-bar]) {
+			position: static !important;
+			top: auto !important;
+			z-index: auto !important;
+			box-shadow: none !important;
+			background: transparent !important;
+			border-color: transparent !important;
+			padding-top: 0 !important;
+			padding-left: 0 !important;
+			padding-right: 0 !important;
+		}
 	}
 </style>

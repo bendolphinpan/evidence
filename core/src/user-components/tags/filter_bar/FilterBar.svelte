@@ -15,9 +15,13 @@
 <div use:intersectionAction aria-hidden="true" class="pointer-events-none h-0 w-0"></div>
 
 <div
+	data-evidence-filter-bar
 	class={cn(
-		'sticky top-4 right-0 left-0 z-50 flex flex-row flex-wrap items-center gap-4 rounded-md border transition-all',
-		floating ? 'bg-background border-border px-4 pt-3 shadow' : 'border-transparent shadow-none'
+		// Sticky while browsing; static in print/PDF so it does not pin over every page.
+		'sticky top-4 right-0 left-0 z-50 flex flex-row flex-wrap items-center gap-4 rounded-md border transition-all print:static print:top-auto print:z-auto',
+		floating
+			? 'bg-background border-border px-4 pt-3 shadow print:border-transparent print:bg-transparent print:px-0 print:pt-0 print:shadow-none'
+			: 'border-transparent shadow-none'
 	)}
 >
 	{@render children?.()}
