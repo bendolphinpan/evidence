@@ -219,7 +219,9 @@ export function assertReadOnlySql(sql: string): string {
 	if (!clean) {
 		throw new Error('SQL cannot be empty');
 	}
-	if (clean.length > 20000) {
+	// TE form/json bodies start failing around ~25–30KB encoded; keep headroom for
+	// Evidence chart wrappers, but allow denser page SQL than the old 20k hard cut.
+	if (clean.length > 50000) {
 		throw new Error('SQL is too long');
 	}
 	if (clean.includes(';')) {

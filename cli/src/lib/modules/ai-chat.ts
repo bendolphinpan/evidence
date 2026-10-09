@@ -23,7 +23,14 @@ type ChatMessage = {
 	tool_calls?: unknown;
 };
 
-type SkillMeta = { name: string; description: string; triggers: string[]; body: string; path: string };
+type SkillMeta = {
+	name: string;
+	description: string;
+	triggers: string[];
+	ondemand: boolean;
+	body: string;
+	path: string;
+};
 
 function aiConfig() {
 	const stored = readStore().settings.ai;
@@ -122,7 +129,8 @@ function parseSkillFile(path: string): SkillMeta | null {
 	const triggers = triggersRaw
 		? triggersRaw.split(/[,，]/).map((s) => s.trim().toLowerCase()).filter(Boolean)
 		: [];
-	return { name, description, triggers, body, path };
+	const ondemand = /^\s*ondemand:\s*(true|yes|1)\s*$/im.test(head);
+	return { name, description, triggers, ondemand, body, path };
 }
 
 function listSkillDir(dir: string): SkillMeta[] {
@@ -144,16 +152,29 @@ function loadLayeredSkills(projectId: string, slug: string, prompt: string): str
 	const legacy = platform.length ? [] : listSkillDir(join(cwd, 'agent', 'skills'));
 
 	const parts: string[] = [];
-	const budget = { platform: 4500, project: 3500, page: 3500 };
+	const budget = { platform: 6000, analysis: 5200, project: 3500, page: 3500 };
+	const q = `${slug} ${prompt}`.toLowerCase();
 	let usedPlat = 0;
 	for (const s of [...platform, ...legacy]) {
+		if (s.ondemand) continue;
 		const chunk = s.body.slice(0, 3500);
 		if (usedPlat + chunk.length > budget.platform) break;
 		parts.push(`### platform/${s.name}\n${chunk}`);
 		usedPlat += chunk.length;
 	}
 
-	const q = `${slug} ${prompt}`.toLowerCase();
+	let usedAnalysis = 0;
+	for (const s of platform) {
+		if (!s.ondemand) continue;
+		const hit =
+			s.triggers.some((t) => t && q.includes(t)) || q.includes(s.name.toLowerCase());
+		if (!hit) continue;
+		const chunk = s.body.slice(0, 2200);
+		if (usedAnalysis + chunk.length > budget.analysis) break;
+		parts.push(`### platform/${s.name}\n${chunk}`);
+		usedAnalysis += chunk.length;
+	}
+
 	let usedProj = 0;
 	for (const s of project) {
 		const pageMatch = slug === s.name || slug.includes(s.name);
@@ -304,7 +325,7 @@ ${agents || '见 platform/AGENTS.md'}
 ## 当前页 markdown
 ${pageMd.slice(0, 5000)}
 
-流程：wiki_lookup / search_sql_kb / search_saved_filters → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。收藏条件由顶栏筛选抽屉套用：页内 SQL 留 AND /*evd-saved*/ 1 = 1，不要再写 saved dropdown 或按 key 分支。用户要新建收藏时告诉他去顶栏筛选里点「收藏」。
+流程：wiki_lookup / search_sql_kb / search_saved_filters → 按 te-sql 写 SQL（用户属性 JOIN ${tables.user}）→ run_sql 跑通 → patch_page。解释数字或写结论时遵守已加载的 data-analysis、scientific-analysis；给策划改动顺序时遵守 game-design 和当前项目 skill。收藏条件由顶栏筛选抽屉套用：页内 SQL 留 AND /*evd-saved*/ 1 = 1，不要再写 saved dropdown 或按 key 分支。用户要新建收藏时告诉他去顶栏筛选里点「收藏」。
 禁止 FROM 查询别名。不要输出 Token。`;
 }
 

@@ -360,14 +360,17 @@ async function queryViaExecuteSql(
 	return downloadSqlPages(config, String(taskId), Number(data.pageCount || 1), headers);
 }
 
-function requestStyles(preferred?: TeRequestStyle): TeRequestStyle[] {
+function requestStyles(preferred?: TeRequestStyle, sqlLength = 0): TeRequestStyle[] {
 	const all: TeRequestStyle[] = ['form', 'json'];
+	// Long SQL must not lead with json against /querySql (@RequestParam only);
+	// also prefer form when TE drops oversized bodies so execute-sql can still retry.
+	if (sqlLength > 8000) return all;
 	if (!preferred || preferred === 'query') return all;
 	return [preferred, ...all.filter((s) => s !== preferred)];
 }
 
 function isRetryableTransportError(message: string): boolean {
-	return /HTTP 404|HTTP 405|HTTP 415|OpenAPI URL is incorrect|Could not reach|timed out|ECONNREFUSED|fetch/i.test(
+	return /HTTP 404|HTTP 405|HTTP 415|OpenAPI URL is incorrect|Could not reach|timed out|ECONNREFUSED|fetch|return_code=-1008|参数\(sql\)为空|MissingServletRequestParameterException|Required request parameter 'sql'/i.test(
 		message || ''
 	);
 }
@@ -389,7 +392,7 @@ async function executeTeSql(
 	const errors: string[] = [];
 	for (const baseUrl of bases) {
 		for (const endpoint of endpoints) {
-			for (const style of requestStyles(preferredStyle)) {
+			for (const style of requestStyles(preferredStyle, sql.length)) {
 				if (style === 'query' && sql.length > 1800) continue;
 				try {
 					const result =
