@@ -19,12 +19,14 @@ import type { QueryService } from '@evidence/core/user-components/interfaces/que
 import type { TranslationMap } from '@evidence/core/types/translations';
 import { preprocessVariables } from '@evidence/core/user-components/Renderer/MarkdocProcessor/preprocess-variables';
 import { registerFiltersFromAST } from '@evidence/core/user-components/Renderer/MarkdocProcessor/register-filters';
+import { rewriteSqlFenceTranslationTokens } from '@evidence/core/user-components/Renderer/MarkdocProcessor/rewrite-bare-translation-sql';
 import {
 	process as coreProcess,
 	transform as uiTransform
 } from '@evidence/core/user-components/Renderer/MarkdocProcessor/process-markdoc';
-import { dialectFor, type WarehouseType } from '@evidence/core/sql-dialect';
+import { dialectFor, defaultDialect, type SqlDialect, type WarehouseType } from '@evidence/core/sql-dialect';
 import { withTimeout } from '$lib/timeout';
+import type { ResolvedProjectSettings } from '$lib/server/project-settings.server';
 
 export type ConnectionType = WarehouseType | null;
 
@@ -62,6 +64,10 @@ export interface ProcessOptions {
 	/** Resolved translations (translations.yaml) for the current language, exposed
 	 * to markdown as the `$translations` variable. */
 	translations?: TranslationMap;
+	/** Project `date:` settings plus the computed date-range anchor, so date-driven
+	 * filters (`workflow.period`, range_calendar) resolve the same defaults the
+	 * client will. Omit for Sunday weeks anchored on today. */
+	projectSettings?: ResolvedProjectSettings;
 }
 
 export interface Processed {
@@ -84,7 +90,7 @@ export async function process(markdown: string, options: ProcessOptions = {}): P
 
 	const filters = new Filters({
 		url: new URL('http://localhost'),
-		projectSettings: { first_day_of_week: 'sunday' },
+		projectSettings: options.projectSettings ?? { first_day_of_week: 'sunday' },
 		updateUrl: undefined,
 		dialect
 	});
@@ -100,12 +106,13 @@ export async function process(markdown: string, options: ProcessOptions = {}): P
 	// page-level ones up front — else same-page queries read as missing tables.
 	const { ast: preAst, referencedDataSources, definedInlineQueries } = preRegisterInlineQueries(
 		markdown,
-		inlineQueries
+		inlineQueries,
+		dialect
 	);
 	// Same ordering problem for filters: introspection interpolates `{{filter_id}}`
 	// references, so the page's filter components must exist (with empty values)
 	// before any warehouse round-trip — else every reference is "Missing filter ID".
-	registerFiltersFromAST(preAst, filters, parsePartials(options.partials), undefined, {
+	registerFiltersFromAST(preAst, filters, parsePartials(options.partials, dialect), undefined, {
 		basePath: options.basePath,
 		useRelativeResolution: options.useRelativeResolution
 	});
@@ -213,22 +220,31 @@ async function loadInlineQueryMetadata(
 // unquoted `attr={{var}}` syntax tokenizes as a valid tag (it skips code
 // fences, so inline-query extraction is unaffected). Without this, a filter
 // component using that syntax never registers and introspection still errors.
-function preRegisterParse(markdown: string): Node {
-	return Markdoc.parse(tokenizer.tokenize(preprocessVariables(markdown)));
+function preRegisterParse(markdown: string, dialect: SqlDialect): Node {
+	const ast = Markdoc.parse(tokenizer.tokenize(preprocessVariables(markdown)));
+	rewriteSqlFenceTranslationTokens(ast, dialect);
+	return ast;
 }
 
-function parsePartials(partials?: Record<string, string>): Record<string, Node> | undefined {
+function parsePartials(
+	partials: Record<string, string> | undefined,
+	dialect: SqlDialect
+): Record<string, Node> | undefined {
 	if (!partials) return undefined;
 	return Object.fromEntries(
-		Object.entries(partials).map(([name, content]) => [name, preRegisterParse(content)])
+		Object.entries(partials).map(([name, content]) => [
+			name,
+			preRegisterParse(content, dialect)
+		])
 	);
 }
 
 function preRegisterInlineQueries(
 	markdown: string,
-	inlineQueries: InlineQueries
+	inlineQueries: InlineQueries,
+	dialect: SqlDialect
 ): { ast: Node; referencedDataSources: Set<string>; definedInlineQueries: Set<string> } {
-	const ast = preRegisterParse(markdown);
+	const ast = preRegisterParse(markdown, dialect);
 	const referencedDataSources = new Set<string>();
 	const definedInlineQueries = new Set<string>();
 
@@ -253,10 +269,12 @@ function preRegisterInlineQueries(
  * Parse markdown string into AST
  * Preprocesses markdown to quote unquoted variables (e.g., attr={{var}} → attr="{{var}}")
  */
-export function parse(markdown: string): Node {
+export function parse(markdown: string, dialect: SqlDialect = defaultDialect): Node {
 	const preprocessed = preprocessVariables(markdown);
 	const tokens = tokenizer.tokenize(preprocessed);
-	return Markdoc.parse(tokens);
+	const ast = Markdoc.parse(tokens);
+	rewriteSqlFenceTranslationTokens(ast, dialect);
+	return ast;
 }
 
 /**

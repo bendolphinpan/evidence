@@ -1,0 +1,319 @@
+// @vitest-environment jsdom
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { flushSync } from 'svelte';
+import { PeriodFilter } from './PeriodFilter.svelte';
+import { SnowflakeDialect, type SqlDialect } from '../../../sql-dialect';
+
+/** Mid-August 2026: July 2026 is the newest complete month. */
+const ANCHOR = '2026-08-14';
+
+type TestProjectSettings = {
+	computedDefaultDateRangeEnd?: string;
+	first_day_of_week?: 'sunday' | 'monday';
+};
+
+function makeFilter(
+	attributes: Record<string, unknown> = {},
+	dialect?: SqlDialect,
+	projectSettings: TestProjectSettings = { computedDefaultDateRangeEnd: ANCHOR }
+) {
+	return new PeriodFilter(
+		{
+			id: 'period',
+			userComponentName: 'workflow_period',
+			attributes: { grain: 'month', periods: 12, ...attributes }
+		} as never,
+		{
+			url: undefined,
+			updateUrl: undefined,
+			projectSettings,
+			dialect
+		} as never
+	);
+}
+
+describe('PeriodFilter — default selection', () => {
+	it('defaults to the most recent complete period', () => {
+		const filter = makeFilter();
+		// No value is seeded: "unset" means "the newest complete period", so the
+		// default never has to be written to the URL and SSR/client agree.
+		expect(filter.value).toBeUndefined();
+		expect(filter.templateValues.key).toBe('2026-07');
+		expect(filter.templateValues.label).toBe('Jul 2026');
+	});
+
+	it('honours the configured grain', () => {
+		expect(makeFilter({ grain: 'quarter' }).templateValues).toMatchObject({
+			key: '2026-Q2',
+			label: 'Q2 2026',
+			grain: 'quarter'
+		});
+	});
+
+	it('falls back to month when the grain is not a reporting grain', () => {
+		expect(makeFilter({ grain: 'hour' }).templateValues).toMatchObject({
+			key: '2026-07',
+			grain: 'month'
+		});
+	});
+});
+
+describe('PeriodFilter — project date settings', () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('judges completeness against the project default date range end', () => {
+		// Anchored on Jun 30, June is still "in progress", so May is the newest
+		// complete month — even though the wall clock says otherwise.
+		const filter = makeFilter({}, undefined, { computedDefaultDateRangeEnd: '2026-06-30' });
+		expect(filter.templateValues).toMatchObject({ key: '2026-05', label: 'May 2026' });
+		expect(filter.periods[0].key).toBe('2026-05');
+	});
+
+	it('anchors on today when the project has no default date range end', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 7, 14));
+		const filter = makeFilter({}, undefined, {});
+		expect(filter.templateValues.key).toBe('2026-07');
+	});
+
+	it('starts weeks on Sunday by default', () => {
+		// 2026-08-14 is a Friday: the newest complete Sunday week is Aug 2–8.
+		const filter = makeFilter({ grain: 'week', periods: 3 });
+		expect(filter.templateValues).toMatchObject({
+			key: '2026-08-02',
+			label: 'Week of Aug 2, 2026',
+			start_label: 'Aug 2, 2026',
+			end_label: 'Aug 8, 2026'
+		});
+		expect(filter.periods.map((p) => p.key)).toEqual(['2026-08-02', '2026-07-26', '2026-07-19']);
+	});
+
+	it('starts weeks on Monday when first_day_of_week is monday', () => {
+		const filter = makeFilter({ grain: 'week', periods: 3 }, undefined, {
+			computedDefaultDateRangeEnd: ANCHOR,
+			first_day_of_week: 'monday'
+		});
+		expect(filter.templateValues).toMatchObject({
+			key: '2026-08-03',
+			label: 'Week of Aug 3, 2026',
+			start_label: 'Aug 3, 2026',
+			end_label: 'Aug 9, 2026',
+			between: "BETWEEN toDate('2026-08-03') AND toDate('2026-08-09')"
+		});
+		expect(filter.periods.map((p) => p.key)).toEqual(['2026-08-03', '2026-07-27', '2026-07-20']);
+	});
+
+	it('snaps a bookmarked week key to the configured week start', () => {
+		// 2026-08-05 is a Wednesday. Under Monday weeks it belongs to Aug 3–9;
+		// under Sunday weeks to Aug 2–8.
+		const monday = makeFilter({ grain: 'week' }, undefined, {
+			computedDefaultDateRangeEnd: ANCHOR,
+			first_day_of_week: 'monday'
+		});
+		monday.setDefault({ key: '2026-08-05' });
+		expect(monday.templateValues).toMatchObject({ key: '2026-08-03', end_label: 'Aug 9, 2026' });
+
+		const sunday = makeFilter({ grain: 'week' });
+		sunday.setDefault({ key: '2026-08-05' });
+		expect(sunday.templateValues).toMatchObject({ key: '2026-08-02', end_label: 'Aug 8, 2026' });
+	});
+
+	it('steps Monday weeks a week at a time', () => {
+		const filter = makeFilter({ grain: 'week', periods: 3 }, undefined, {
+			computedDefaultDateRangeEnd: ANCHOR,
+			first_day_of_week: 'monday'
+		});
+		expect(filter.olderPeriod?.key).toBe('2026-07-27');
+		expect(filter.newerPeriod).toBeUndefined();
+
+		filter.setDefault({ key: '2026-07-27' });
+		expect(filter.olderPeriod?.key).toBe('2026-07-20');
+		expect(filter.newerPeriod?.key).toBe('2026-08-03');
+	});
+
+	it('ignores week start for grains that do not depend on it', () => {
+		const sunday = makeFilter({ grain: 'month' });
+		const monday = makeFilter({ grain: 'month' }, undefined, {
+			computedDefaultDateRangeEnd: ANCHOR,
+			first_day_of_week: 'monday'
+		});
+		expect(monday.templateValues).toEqual(sunday.templateValues);
+	});
+});
+
+describe('PeriodFilter — template values', () => {
+	it('exposes the period boundaries and label', () => {
+		const filter = makeFilter();
+		expect(filter.templateValues).toEqual({
+			start: "toDate('2026-07-01')",
+			end: "toDate('2026-07-31')",
+			start_label: 'Jul 1, 2026',
+			end_label: 'Jul 31, 2026',
+			between: "BETWEEN toDate('2026-07-01') AND toDate('2026-07-31')",
+			filter: 'true',
+			label: 'Jul 2026',
+			key: '2026-07',
+			grain: 'month'
+		});
+	});
+
+	it('gives plain dates for prose via the _label properties', () => {
+		// `.start` / `.end` are dialect SQL expressions, so writing them in prose
+		// leaks `toDate(...)` onto the page. These are the text-safe pair.
+		const filter = makeFilter();
+		expect(filter.templateValues.start_label).not.toContain('toDate');
+		expect(filter.templateValues.end_label).not.toContain('toDate');
+	});
+
+	it('keeps the _label properties dialect-independent', () => {
+		const snowflake = makeFilter({}, new SnowflakeDialect());
+		expect(snowflake.templateValues.start_label).toBe('Jul 1, 2026');
+		expect(snowflake.templateValues.end_label).toBe('Jul 31, 2026');
+	});
+
+	it('labels boundaries for every grain', () => {
+		expect(makeFilter({ grain: 'quarter' }).templateValues).toMatchObject({
+			start_label: 'Apr 1, 2026',
+			end_label: 'Jun 30, 2026'
+		});
+		expect(makeFilter({ grain: 'year' }).templateValues).toMatchObject({
+			start_label: 'Jan 1, 2025',
+			end_label: 'Dec 31, 2025'
+		});
+		expect(makeFilter({ grain: 'day' }).templateValues).toMatchObject({
+			start_label: 'Aug 13, 2026',
+			end_label: 'Aug 13, 2026'
+		});
+	});
+
+	it('emits Snowflake date literals under the Snowflake dialect', () => {
+		const filter = makeFilter({}, new SnowflakeDialect());
+		expect(filter.templateValues.start).toBe("TO_DATE('2026-07-01')");
+		expect(filter.templateValues.between).toBe(
+			"BETWEEN TO_DATE('2026-07-01') AND TO_DATE('2026-07-31')"
+		);
+	});
+
+	it('builds a self-contained predicate when value_column is set', () => {
+		const filter = makeFilter({ value_column: 'order_date' });
+		const expected = "order_date >= toDate('2026-07-01') AND order_date <= toDate('2026-07-31')";
+		expect(filter.templateValues.filter).toBe(expected);
+		expect(filter.sql).toBe(expected);
+	});
+
+	it('contributes no predicate without value_column — the column lives in the template', () => {
+		const filter = makeFilter();
+		expect(filter.templateValues.filter).toBe('true');
+		expect(filter.sql).toBeUndefined();
+		expect(filter.queryOnly).toBe(true);
+	});
+
+	it('defaults to .between in SQL and .label in text', () => {
+		expect(PeriodFilter.defaultProperty).toEqual({
+			sql: 'between',
+			text: 'label',
+			column: 'label'
+		});
+	});
+});
+
+describe('PeriodFilter — selection', () => {
+	it('resolves a selected key to that period', () => {
+		const filter = makeFilter();
+		filter.setDefault({ key: '2026-03' });
+		expect(filter.templateValues).toMatchObject({
+			key: '2026-03',
+			label: 'Mar 2026',
+			between: "BETWEEN toDate('2026-03-01') AND toDate('2026-03-31')"
+		});
+	});
+
+	it('resolves a period older than the offered window', () => {
+		const filter = makeFilter({ periods: 3 });
+		filter.setDefault({ key: '2019-11' });
+		expect(filter.templateValues.label).toBe('Nov 2019');
+	});
+
+	it('falls back to the default period when the key is unparseable', () => {
+		const filter = makeFilter();
+		filter.setDefault({ key: 'nonsense' });
+		expect(filter.templateValues.key).toBe('2026-07');
+	});
+});
+
+describe('PeriodFilter — URL serialization', () => {
+	it('round-trips through the URL param as a bare key', () => {
+		const filter = makeFilter();
+		filter.setDefault({ key: '2026-05' });
+		expect(filter.serializedValue).toBe('2026-05');
+
+		const restored = makeFilter();
+		restored.applySerialized('2026-05');
+		expect(restored.value).toEqual({ key: '2026-05' });
+		expect(restored.templateValues.label).toBe('May 2026');
+	});
+});
+
+describe('PeriodFilter — options offered to the picker', () => {
+	it('lists the configured number of complete periods, newest first', () => {
+		const periods = makeFilter({ periods: 3 }).periods;
+		expect(periods.map((p) => p.key)).toEqual(['2026-07', '2026-06', '2026-05']);
+	});
+
+	it('defaults to 12 periods', () => {
+		expect(makeFilter({ periods: undefined }).periods).toHaveLength(12);
+	});
+});
+
+describe('PeriodFilter — frontmatter edits', () => {
+	it('re-derives the picker when attributes are updated in place', () => {
+		// register-filters updates the existing filter rather than recreating it,
+		// so the picker (which has no tag component) must observe the change.
+		const filter = makeFilter();
+		const seen: string[] = [];
+		const cleanup = $effect.root(() => {
+			$effect(() => {
+				seen.push(`${filter.grain}:${filter.period.key}:${filter.periods.length}`);
+			});
+		});
+		flushSync();
+		expect(seen).toEqual(['month:2026-07:12']);
+
+		filter.attributes = { grain: 'week', periods: 4 };
+		flushSync();
+		// The month key no longer parses as a week, so the newest complete week wins.
+		expect(seen.at(-1)).toBe('week:2026-08-02:4');
+		cleanup();
+	});
+});
+
+describe('PeriodFilter — stepping', () => {
+	it('steps one period at a time within the window', () => {
+		const filter = makeFilter({ periods: 3 });
+		expect(filter.olderPeriod?.key).toBe('2026-06');
+		// Already on the newest complete period.
+		expect(filter.newerPeriod).toBeUndefined();
+
+		filter.setDefault({ key: '2026-06' });
+		expect(filter.olderPeriod?.key).toBe('2026-05');
+		expect(filter.newerPeriod?.key).toBe('2026-07');
+	});
+
+	it('stops at the oldest offered period', () => {
+		const filter = makeFilter({ periods: 3 });
+		filter.setDefault({ key: '2026-05' });
+		expect(filter.olderPeriod).toBeUndefined();
+		expect(filter.newerPeriod?.key).toBe('2026-06');
+	});
+
+	it('walks a bookmarked out-of-window period back toward the window', () => {
+		// Regression: an index-based lookup returned -1 here and made "older"
+		// jump to the newest period.
+		const filter = makeFilter({ periods: 3 });
+		filter.setDefault({ key: '2019-11' });
+		expect(filter.olderPeriod).toBeUndefined();
+		expect(filter.newerPeriod?.key).toBe('2019-12');
+	});
+});

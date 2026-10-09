@@ -68,21 +68,21 @@ Two regimes, chosen by data-point count:
 
 ### Pinned ticks (`customValues`) — ≤ 15 positions
 
-Each tick sits exactly on a data position. One label per bar/point. Applied to
-both `axisLabel.customValues` and `axisTick.customValues`. Requires ECharts
-≥ 6.1.0 (customValues on time axes).
-
-The tick positions are built in two steps:
+Ticks are set explicitly via `axisLabel.customValues` and
+`axisTick.customValues` (ECharts ≥ 6.1.0). A label per point only reads well
+when the points keep a rhythm, so regular data pins a tick to every data
+position, and irregular data gets a calendar of period ticks instead. Chosen in
+this order (`buildTickStrategy`):
 
 1. **Raw positions**: sorted, deduped x-timestamps from every series' query
    rows (`seriesTimestamps`).
 2. **Grain fill**: when an effective grain exists, walk from data-min to
    data-max one grain unit at a time (`walkGrainTicks`) and use those
-   positions instead — so a monthly chart missing July still shows a labeled
-   July slot. Whether a bar renders there is the series layer's business (see
+   positions — so a monthly chart missing July still shows a labeled July
+   slot. Whether a bar renders there is the series layer's business (see
    "Interaction with series fill"); the axis label appears either way.
 
-   Grain-fill output is **rejected** (falling back to raw positions) when:
+   Grain-fill output is **rejected** when:
    - it exceeds 15 positions (the tick budget), or
    - for **inferred** grains only, it exceeds `3 × raw count` — a guard
      against a mis-inferred grain ballooning 2 yearly points into 730 daily
@@ -90,7 +90,40 @@ The tick positions are built in two steps:
      to distrust, so sparse data (3 monthly readings across 11 months) still
      labels every month.
 
-3. **Walker mechanics**: local-time Date arithmetic (`setMonth`, `setDate`,
+3. **Steady cadence** (`steadyCadenceTicks`): points whose gaps are all whole
+   multiples of the smallest gap stay pinned at that cadence — weekly Fridays
+   (inferred grain `day`, which can't fill), every 17th of the month, every
+   5 months. Measured in calendar months when every point shares a day of
+   month, else in elapsed time with 1.5h of DST slack. Missing periods get a
+   slot; the same budget and ratio guard apply.
+
+4. **Irregular dates → period ticks**: points with no steady cadence (Mar 11,
+   Mar 14, Apr 22 …) get ticks at period starts, stepping through d3's
+   time-scale ladder — 1 day, 1 month, 3 months, 6 months, 1 year (never
+   week: week ticks phase off the first point and name nothing a reader
+   thinks in) — and taking the finest step coarser than the data grain that
+   yields at least 4 ticks within the budget and ratio guard. Multi-month
+   steps align to January and stay labelled in months (`Apr Jul Oct 2024`),
+   never quarters: no charting library switches label vocabulary on its own,
+   and "Q2" reads as a quarterly total. 10 scattered days from Jan 8 to Sep 30
+   render as `Jan Feb … Sep`; 5 events over Feb 2023 – Sep 2024 as
+   `Feb 2023 Apr Jul Oct 2024 Apr Jul`; 8 hours over five days as
+   `Mar 2 … Mar 6`. Data starting ≥ 40% of a step before the first aligned
+   tick gets an anchor tick at data-min so the opening stretch is labelled
+   (the `Jan` above sits on Jan 8). Points sit at their true dates; the tooltip carries the exact date.
+   A user x `fmt` formats these ticks like any other ("Feb 1/24"), as it does
+   ECharts' own ticks on dense axes. The label grain changes only axis label
+   text and two-tier geometry; tooltips, bar widths and series fill keep the
+   data grain.
+
+5. **Short irregular spans stay pinned**: when no calendar grain gives 4
+   ticks (scattered days across a few weeks), the points keep their own
+   labels. The tick that opens each new month (or day, for hours) names it —
+   `Jan 20, 23, 27, 31, Feb 2, 6, 9, 14`; for hours `9 pm, Mar 3, 4 am, 10 am`;
+   a year rollover uses the year label (`previousTick` in
+   `formatTimeAxisLabel`) — and § 6 thinning keeps them clear of each other.
+
+6. **Walker mechanics**: local-time Date arithmetic (`setMonth`, `setDate`,
    `setHours`) so month lengths and DST roll over correctly; hard cap of 500
    iterations.
 
@@ -324,14 +357,44 @@ line, and area charts over the same data share one visual grammar. (Category
 axes — true categorical bars — still rotate via `withAutoXAxisLabelLayout`.)
 
 **Thinning** is stride-based: keep every k-th tick, with k the smallest
-stride that fits the width budget. A fixed stride gives the axis a steady
-calendar rhythm ("Feb, Apr, Jun, Aug") where a greedy closest-fit pick
-produced irregular clusters ("Mar, Apr, Jun, Jul, Sep") on forced-anchor or
-gappy data. Always kept: first, last, and any two-tier year label
-("Jan\n2020") — dropping a year rollover orphans the reader's sense of which
-year surrounding months belong to. Stride picks landing within half a stride
-of a kept anchor are dropped so an anchor never gains an adjacent sibling
-("… Oct, Dec, Jan 2025" yields to "… Oct, Jan 2025").
+stride that fits the width budget (widest label + 8px per tick, as if ticks
+were evenly spaced). A fixed stride gives the axis a steady calendar rhythm
+("Feb, Apr, Jun, Aug") where a greedy closest-fit pick produced irregular
+clusters ("Mar, Apr, Jun, Jul, Sep") on forced-anchor or gappy data. Always
+kept: first, last, and any two-tier year label ("Jan\n2020") — dropping a
+year rollover orphans the reader's sense of which year surrounding months
+belong to. Stride picks landing within half a stride of a kept anchor are
+dropped so an anchor never gains an adjacent sibling ("… Oct, Dec, Jan 2025"
+yields to "… Oct, Jan 2025").
+
+**Collision pass (the overlap guarantee).** The budget assumes evenly spaced
+ticks, but pinned ticks sit at their timestamps: two dates days apart (Mar 11
+and Mar 14 on a 9-month axis) land a few pixels apart even when the label
+count fits. So the stride's picks are then kept in priority order — first,
+last, year rollovers, then left to right — and any label that would come
+within 4px of one already kept is dropped. For a cluster that drops one label
+(Mar 14's bar goes unlabelled) and every other tick keeps its own. The pass
+only removes labels that genuinely collide, so an axis that already reads
+cleanly is untouched; because it runs last, no tick strategy upstream can
+produce overlapping pinned labels.
+
+It runs twice: once before render on estimated positions (linear in time
+across the plot) and again after ECharts has laid out the chart
+(`withMeasuredTimeAxisLabelThinning`, from `echarts.action`), using the real
+tick positions (`convertToPixel`) and label widths (the axis label model,
+with the theme's font). The pre-render estimate can be ~30px off — y-axis
+label width, bar overflow and outer-bounds fitting all move the plot edges.
+The second pass re-runs from the unthinned ticks and merges only when its
+result differs; both `setOption` calls land before the browser paints.
+
+**Thinned labels keep their context.** Hiding a tick can hide the label that
+named a month or year ("May 6" thinned away leaves "29, 13"). The thinning
+wraps the formatter so each kept label receives the tick visibly before it
+(`previousTick` in `formatTimeAxisLabel`): a day tick that opens a month names
+it ("May 13"), an hour tick that opens a day names the date, and a
+month/quarter tick that opens a year states it ("Q3 2024"). A label that grows
+this way is re-measured, and the collision pass re-runs until no kept pair
+collides.
 
 ### Two-tier label geometry
 
@@ -360,12 +423,12 @@ of a kept anchor are dropped so an anchor never gains an adjacent sibling
 
 ### End-to-end rendered-label tests
 
-Two suites pin the FINAL output of this whole spec — dataset + container width
-→ the exact labels ECharts paints, extracted from its server-side SVG render —
-sharing one harness (`x-axis-test-harness.ts`) that runs the real `XAxisModel`,
-the real layout helpers (with a stub node of the given `clientWidth`), real
-series-value canonicalization (`seriesConfig.formatXValue`), and real ECharts
-tick placement:
+Three suites pin the FINAL output of this whole spec — dataset + container
+width → what ECharts paints, from its server-side render — sharing one harness
+(`x-axis-test-harness.ts`) that runs the real `XAxisModel`, the real layout
+helpers (with a stub node of the given `clientWidth`) including the measured
+second pass, real series-value canonicalization (`seriesConfig.formatXValue`),
+YAxisModel's label/title layout, and real ECharts tick placement:
 
 - **`x-axis-label-matrix.test.ts`** — THE matrix: one enforced cell per
   (column type × grain × density × span × width) combination in this spec, plus
@@ -378,11 +441,20 @@ tick placement:
 - **`x-axis-rendered-labels.test.ts`** — deep-dive scenarios (two-tier geometry,
   title clearance, gap handling, multi-year first-tick anchors, DST) that need
   more than a single labels-array assertion.
+- **`label-geometry.test.ts`** — layout INVARIANTS rather than label text: no
+  two painted labels overlap (x, y, data labels, axis title; rotated boxes
+  included) and none is cut off by the container. Boxes are read from
+  ECharts' element tree (`label-geometry.ts`), so the same check runs against
+  a live browser chart. Named regression shapes (irregular and clustered
+  dates) plus a fast-check generator over axis type × date spacing ×
+  count × fmt × grain × width × mark × data labels; failures shrink to a
+  minimal chart. Layout bugs not yet fixed are pinned as `it.fails` cases, and
+  `LABEL_GEOMETRY_SURVEY=1` prints every violation class the generator finds.
 
-When changing anything in this document, add or update cases in both as
-appropriate. (Node measures text with the char-count fallback rather than
-browser canvas, so thin/rotate breakpoints can sit a few pixels off a real
-browser — decisions are deterministic, exact widths are not.)
+When changing anything in this document, add or update cases in all three as
+appropriate. (Node measures text with ECharts' built-in width table rather
+than a browser font, so thin/rotate breakpoints can sit a few pixels off a
+real browser — decisions are deterministic, exact widths are not.)
 
 ## Interaction with series fill (`fillGaps`)
 

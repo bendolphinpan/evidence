@@ -2,6 +2,7 @@
 	import type { PageData } from './$types';
 	import { Renderer, deserializeTree } from '$lib/markdown';
 	import CLIPageWrapper from '$lib/components/CLIPageWrapper.svelte';
+	import PeriodPicker from '@evidence/core/viewer-components/PeriodPicker.svelte';
 	import { page } from '$app/state';
 	import { generateThemeCSS } from '@evidence/core/theme/theme-css-helper';
 	import { setThemeContext } from '@evidence/core/theme/theme.context.svelte';
@@ -53,6 +54,7 @@
 			<CLIPageWrapper
 				organizationId={data.organizationId ?? ''}
 				connectionType={data.connectionType}
+				schemaAllowlist={data.schemaAllowlist}
 				serializedInlineQueries={data.markdown.serializedInlineQueries}
 				serializedFilters={data.markdown.serializedFilters}
 				sqlFiles={data.markdown.sqlFiles}
@@ -62,6 +64,7 @@
 				{pageSettings}
 				projectSettings={data.projectSettings}
 			>
+				<PeriodPicker class="mb-4" />
 				<div
 					class="prose dark:prose-invert prose-code:before:content-none prose-code:after:content-none select-text"
 				>

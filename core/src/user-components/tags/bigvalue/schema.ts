@@ -5,7 +5,6 @@ import {
 	columnsExistInTable,
 	filtersExist,
 	validateSqlExpression,
-	validateDateAttributes,
 	validateComparison,
 	validateBenchmarkProperties,
 	validateSqlOptions,
@@ -49,8 +48,9 @@ const comparisonSchema = baseComparisonSchema
 		down_is_good: setZodMetadata(
 			booleanVariableSchema
 				.optional()
-				.default(false)
-				.describe('Whether a decrease is considered positive'),
+				.describe(
+					"Whether a decrease is considered positive. Defaults to the page's `down_is_good` setting."
+				),
 			{ supportsVariables: true }
 		),
 		neutral_range: setZodMetadata(
@@ -322,7 +322,6 @@ export const schema = {
 		validateSqlExpression('comparison.benchmark.subject', 'data', 'select'),
 		validateSqlExpression('comparison.benchmark.value', 'data', 'select'),
 		validateSqlExpression('comparison.benchmark.within', 'data', 'select'),
-		validateDateAttributes(),
 		validateDateRange(),
 		validateComparison(),
 		validateBenchmarkProperties(),
@@ -349,6 +348,7 @@ export const schema = {
 		width: 'fit',
 		compactErrors: true,
 		flex: {
+			compact: true,
 			grow: 1,
 			minWidth: 180,
 			automaticallyWrapConsecutiveComponentsInRow: true

@@ -17,6 +17,10 @@
 			"svelte": "./src/config/page-frontmatter-schema.ts",
 			"default": "./src/config/page-frontmatter-schema.ts"
 		},
+		"./config/markdown-file-kind": {
+			"svelte": "./src/config/markdown-file-kind.ts",
+			"default": "./src/config/markdown-file-kind.ts"
+		},
 		"./types/translations": {
 			"svelte": "./src/types/translations.ts",
 			"default": "./src/types/translations.ts"
@@ -54,12 +58,12 @@
 		"highlight.js": "^11.11.1",
 		"html-to-image": "^1.11.13",
 		"i18next": "^25.7.1",
-		"js-yaml": "^4.3.0",
+		"js-yaml": "^4.3.2",
 		"json5": "^2.2.3",
 		"just-debounce-it": "^3.2.0",
 		"lodash": "^4.18.1",
 		"lucide-svelte": "^0.544.0",
-		"maplibre-gl": "^5.24.0",
+		"maplibre-gl": "^6.4.1",
 		"mode-watcher": "^1.0.8",
 		"p-retry": "^7.1.0",
 		"pako": "^2.1.0",
@@ -84,6 +88,7 @@
 		"@types/lodash": "^4.17.15",
 		"@types/pako": "^2.0.4",
 		"chdb": "^1.6.0",
+		"fast-check": "^4.8.0",
 		"snowflake-sdk": "^2.3.6",
 		"svelte-check": "^4.3.4",
 		"typescript": "^5.9.3",

@@ -10,7 +10,7 @@ import {
 } from './output.ts';
 import { INIT_WAREHOUSES, parseWarehouse, type InitWarehouse } from './init/connection-template.ts';
 
-export const VERSION = '0.9.2';
+export const VERSION = '0.10.1';
 
 export const BANNER = `
   evidence
@@ -30,6 +30,7 @@ Deploy
   launch      Connect this project to Evidence Studio + GitHub (deploy via git push)
   link        Attach this repo to an existing Studio project
   unlink      Disconnect this repo from its Studio project
+  serve       Self-host the project (production server; needs connection.yaml)
 
 Data
   query       Run a SQL query against the warehouse
@@ -59,6 +60,7 @@ Account
 Other
   docs        Search Evidence documentation
   upgrade     Upgrade the CLI
+  telemetry   Show or change anonymous usage reporting (status|enable|disable)
 
 Options
   --format <json|ndjson|csv|table>   Output format
@@ -97,8 +99,11 @@ export type Command =
 	| 'docs'
 	| 'token'
 	| 'upgrade'
+	| 'telemetry'
 	| 'help'
 	| 'version';
+
+export type TelemetrySubcommand = 'status' | 'enable' | 'disable';
 
 export interface QueryOptions {
 	/** The SQL query to execute (or '-' to read from stdin) */
@@ -161,6 +166,8 @@ export interface ParsedArgs {
 	open: boolean | undefined;
 	/** Bind address for dev/serve (--host); null = mode default. */
 	host: string | null;
+	/** Subcommand for telemetry; null = status */
+	telemetrySubcommand: TelemetrySubcommand | null;
 }
 
 /** Flags that consume the following token as their value. */
@@ -312,7 +319,8 @@ export function parseArgs(): ParsedArgs {
 		uploadCredentials: false,
 		linkProject: null,
 		open: undefined,
-		host: null
+		host: null,
+		telemetrySubcommand: null
 	} satisfies Omit<ParsedArgs, 'command'>;
 
 	// Check for help/version flags first. Note: `-v` now means `--verbose`
@@ -353,6 +361,7 @@ export function parseArgs(): ParsedArgs {
 		'lineage',
 		'docs',
 		'upgrade',
+		'telemetry',
 		'dev',
 		'serve',
 		'publish',
@@ -417,6 +426,7 @@ export function parseArgs(): ParsedArgs {
 	else if (firstArg === 'lineage') command = 'lineage';
 	else if (firstArg === 'docs') command = 'docs';
 	else if (firstArg === 'upgrade') command = 'upgrade';
+	else if (firstArg === 'telemetry') command = 'telemetry';
 	else if (firstArg === 'dev') command = 'dev';
 	else if (firstArg === 'serve') command = 'serve';
 	else if (firstArg === 'publish') command = 'publish';
@@ -574,6 +584,18 @@ export function parseArgs(): ParsedArgs {
 		docsArgs = remaining.slice(1);
 	}
 
+	let telemetrySubcommand: TelemetrySubcommand | null = null;
+	if (command === 'telemetry') {
+		const sub = args[1];
+		if (sub === 'status' || sub === 'enable' || sub === 'disable') {
+			telemetrySubcommand = sub;
+		} else if (sub && !sub.startsWith('-')) {
+			console.error(`Unknown telemetry subcommand: '${sub}'`);
+			console.error('Usage: evidence telemetry [status|enable|disable]');
+			process.exit(1);
+		}
+	}
+
 	// --table <name> (narrows `schema` to one table)
 	let schemaTable: string | null = null;
 	if (command === 'schema') {
@@ -622,7 +644,8 @@ export function parseArgs(): ParsedArgs {
 		uploadCredentials,
 		linkProject,
 		open,
-		host
+		host,
+		telemetrySubcommand
 	};
 }
 
@@ -666,7 +689,7 @@ export function showDefault(status: AuthStatusForWelcome): void {
 	console.log('');
 
 	// Commands
-	console.log('  Commands:  dev, launch, link, unlink, query, tables, describe, schema,');
+	console.log('  Commands:  dev, serve, launch, link, unlink, query, tables, describe, schema,');
 	console.log(
 		'             connectors, validate, docs, login, logout, whoami, orgs, switch, token'
 	);

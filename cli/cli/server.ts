@@ -5,10 +5,11 @@
 import { file } from 'bun';
 import path from 'node:path';
 import { execPath } from 'process';
-import { ensureStudioServerOrExit, openBrowser } from './server.shared.ts';
+import { warnIfStudioUnreachable, describeDevMode, openBrowser } from './server.shared.ts';
 // Auth logic shared with the SvelteKit hook (SSR/API traffic); the static
 // branch below returns before SvelteKit runs, so it must check independently.
 import { authDisabled, checkBasicAuth, SERVE_HARDENED_HEADERS } from './basic-auth.ts';
+import { track } from './telemetry.ts';
 
 // @ts-ignore - generated at build time
 import { assetMap } from './assets.generated.ts';
@@ -112,7 +113,8 @@ async function handleStaticRequest(req: Request): Promise<Response | null> {
 	if (prerenderedRoutes.includes(url.pathname)) {
 		const htmlPath = url.pathname === '/' ? '/index.html' : `${url.pathname}.html`;
 		const htmlFile = await getFile(htmlPath);
-		if (htmlFile) return respondWithFile({ ...htmlFile, type: htmlFile.type || 'text/html' }, req, headers);
+		if (htmlFile)
+			return respondWithFile({ ...htmlFile, type: htmlFile.type || 'text/html' }, req, headers);
 	}
 
 	// Check static assets
@@ -166,6 +168,7 @@ export async function startServer(options: ServerOptions): Promise<void> {
 				'    Set EVIDENCE_BASIC_USER and EVIDENCE_BASIC_PASSWORD, or keep --host at 127.0.0.1.\n' +
 				'    On a trusted private network only, EVIDENCE_AUTH_DISABLED=true skips auth entirely.'
 		);
+		await track('serve_preflight_failed', { reason: 'no_auth_on_public_host' });
 		process.exit(1);
 	}
 
@@ -177,9 +180,9 @@ export async function startServer(options: ServerOptions): Promise<void> {
 		);
 	}
 
-	// Self-hosting needs nothing from Studio — checking reachability here would
-	// hard-fail valid deployments behind an outbound firewall.
-	if (!isServe) await ensureStudioServerOrExit();
+	// Self-hosting needs nothing from Studio; dev only warns, and only when the
+	// managed engine is actually in play (no connection.yaml).
+	if (!isServe) await warnIfStudioUnreachable();
 
 	let server!: ReturnType<typeof Bun.serve>;
 	let actualPort = port;
@@ -253,6 +256,8 @@ export async function startServer(options: ServerOptions): Promise<void> {
 					: '  Mode: serve (hardened) — localhost only, no auth required'
 		);
 		console.log(`  Bound to ${host}; restart to pick up project changes.\n`);
+	} else {
+		console.log(`  Mode: dev — ${await describeDevMode()}\n`);
 	}
 
 	if (open) openBrowser(url);

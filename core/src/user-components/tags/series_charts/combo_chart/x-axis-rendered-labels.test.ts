@@ -1,14 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { init } from 'echarts';
-import type { EChartsOption } from 'echarts';
-import { XAxisModel } from './XAxisModel.svelte';
-import type { YAxisModel } from './YAxisModel.svelte';
-import { TWO_TIER_LABEL_EXTRA_GRID_BOTTOM_PX } from './constants';
 import { canonicalizeTimeAxisValue } from '../../../formatValue';
-import {
-	withAutoTimeAxisLabelThinning,
-	withAutoXAxisLabelLayout
-} from '../../echarts/echarts-utils';
+import { makeXAxisModel, renderAxis, type RenderArgs } from './x-axis-test-harness';
 
 /**
  * END-TO-END axis label rendering tests.
@@ -21,242 +13,9 @@ import {
  * ECharts' server-side SVG renderer, which paints the same `<text>` elements
  * a browser canvas would.
  *
- * Fidelity caveat: in Node our label measurement uses the char-count fallback
- * (no canvas) and ECharts uses its built-in measurer, so thin/rotate
- * *breakpoints* can sit a few pixels off from a browser with Geist loaded.
- * The decisions are deterministic — any change to what renders at a given
- * width fails loudly here.
+ * Rendered through the shared harness (`x-axis-test-harness.ts`), whose
+ * fidelity caveat applies: breakpoints can sit a few pixels off a browser.
  */
-
-// ── Harness ─────────────────────────────────────────────────────────────────
-
-interface RenderArgs {
-	width: number;
-	height?: number;
-	rows: Record<string, unknown>[];
-	columns: { name: string; jsType: string }[];
-	x: string;
-	y: string;
-	seriesType?: 'line' | 'bar';
-	dateGrain?: string;
-	fmt?: string;
-	xAxisOptions?: Record<string, unknown>;
-	/** Render the x-axis title graphic like ComboChart does (bottom-right). */
-	title?: string;
-	/**
-	 * Mirror ComboChart's stacked-chart coercion: force the axis to `category`
-	 * (dropping the value-axis-only boundaryGap/min/max). Used to exercise a
-	 * stacked bar/area on a numeric grain, which lands on a category axis.
-	 */
-	forceCategory?: boolean;
-}
-
-function makeXAxisModel(args: RenderArgs): XAxisModel {
-	const queryResult = { rows: args.rows, columns: args.columns };
-	const stubAxis = { series: [{ query: { result: queryResult } }] } as unknown as YAxisModel;
-	const emptyAxis = { series: [] } as unknown as YAxisModel;
-	return new XAxisModel(
-		() => ({
-			x: args.x,
-			date_grain: args.dateGrain,
-			fmt: args.fmt,
-			...args.xAxisOptions
-		}),
-		() => ({ y1: stubAxis, y2: emptyAxis })
-	);
-}
-
-const CHART_MARGIN_PX = 3;
-const X_AXIS_FONT_SIZE = 12;
-
-/** Mirrors the ComboChart pieces the axis pipeline depends on (grid budget, title graphic, series shape). */
-function coerceToCategory(axisConfig: EChartsOption['xAxis']): EChartsOption['xAxis'] {
-	// Same override ComboChart applies to stacked non-time charts.
-	const { boundaryGap: _b, min: _min, max: _max, ...rest } = axisConfig as Record<string, unknown>;
-	return { ...rest, type: 'category' } as EChartsOption['xAxis'];
-}
-
-function assembleOptions(model: XAxisModel, args: RenderArgs): EChartsOption {
-	const titleVisible = Boolean(args.title);
-	// Mirror seriesConfig.formatXValue: only a date column on a real time axis
-	// gets offset-stripped; a numeric category axis stringifies; everything else
-	// (strings, value-axis numbers) passes through. (Kept identical to
-	// x-axis-test-harness so the two harnesses can't disagree with production.)
-	const axisType = args.forceCategory ? 'category' : (model.axisConfig as { type?: string }).type;
-	const xJsType = args.columns.find((c) => c.name === args.x)?.jsType;
-	const isTimeAxis = xJsType === 'date' && axisType !== 'category';
-	const formatXValue = (value: unknown): string | number | Date => {
-		if (axisType === 'category' && typeof value === 'number') return String(value);
-		if (isTimeAxis) return canonicalizeTimeAxisValue(value) as string | number | Date;
-		return value as string | number | Date;
-	};
-	const gridBottom =
-		(titleVisible
-			? CHART_MARGIN_PX + X_AXIS_FONT_SIZE + 27
-			: CHART_MARGIN_PX + X_AXIS_FONT_SIZE + 12) +
-		(model.hasTwoTierLabels ? TWO_TIER_LABEL_EXTRA_GRID_BOTTOM_PX : 0);
-	return {
-		// ECharts is left on its default local-time clock — matching production
-		// (echarts.action no longer pins useUTC). The x-values in series.data are
-		// canonicalized via canonicalizeTimeAxisValue (below), exactly as
-		// production's seriesConfig does: any UTC offset is stripped so ECharts,
-		// our tick math (parseSeriesTimestampMs), and the label formatters all
-		// read the same offset-free wall-clock digits. A date therefore renders
-		// verbatim — the same for every viewer — in any runtime timezone.
-		animation: false,
-		grid: {
-			top: 20,
-			left: CHART_MARGIN_PX,
-			right: CHART_MARGIN_PX,
-			bottom: gridBottom
-		},
-		xAxis: args.forceCategory ? coerceToCategory(model.axisConfig) : model.axisConfig,
-		yAxis: { type: 'value' },
-		...(titleVisible
-			? {
-					// Same shape as ComboChart's x-axis title graphic: anchored to
-					// the container's bottom-right, independent of grid.bottom.
-					graphic: [
-						{
-							type: 'text' as const,
-							right: 1,
-							bottom: 0,
-							style: { text: args.title, fontSize: X_AXIS_FONT_SIZE }
-						}
-					]
-				}
-			: {}),
-		series: [
-			{
-				type: args.seriesType ?? 'line',
-				barMaxWidth: 60,
-				data: args.rows.map((r) => [formatXValue(r[args.x]), r[args.y]])
-			}
-		]
-	} as EChartsOption;
-}
-
-interface RenderedAxis {
-	/** Painted x-axis labels, left to right. Two-line labels contain '\n'. */
-	labels: string[];
-	/** Whether the labels were auto-rotated. */
-	rotated: boolean;
-	/**
-	 * Vertical clearance (px) between the bottom of the lowest label line and
-	 * the top of the x-axis title text. Only set when a title was rendered.
-	 * Negative would mean the year tier overlaps the title.
-	 */
-	titleClearancePx?: number;
-}
-
-/**
- * The full pipeline: model → assembled options → width-aware layout helpers
- * (with a fake node of the given size) → ECharts SSR render → extract painted
- * x-axis label text from the SVG.
- */
-function renderAxis(args: RenderArgs): RenderedAxis {
-	const { width, height = 240 } = args;
-	const model = makeXAxisModel(args);
-	const assembled = assembleOptions(model, args);
-	const node = { clientWidth: width, clientHeight: height } as HTMLDivElement;
-
-	// Same order as echarts.action's getLaidOutOptions.
-	const categoryLayout = withAutoXAxisLabelLayout(assembled, node, 0);
-	const timeLayout = withAutoTimeAxisLabelThinning(categoryLayout.options, node);
-	const finalOptions = timeLayout.options;
-	const renderHeight = height + categoryLayout.extraHeight;
-
-	const chart = init(null, null, { renderer: 'svg', ssr: true, width, height: renderHeight });
-	chart.setOption(finalOptions);
-	const svg = chart.renderToSVGString();
-	chart.dispose();
-
-	const grid = (finalOptions as { grid?: { bottom?: number } }).grid;
-	const gridBottom = typeof grid?.bottom === 'number' ? grid.bottom : 0;
-	const plotBottom = renderHeight - gridBottom;
-	return extractAxisLabels(svg, plotBottom, args.title);
-}
-
-/**
- * Pulls x-axis label strings out of the rendered SVG: every `<text>` painted
- * below the plot area, grouped by tick x-position (a two-tier label is two
- * text nodes at the same x — rejoined with '\n'), ordered left to right.
- * When `titleText` is given, that text node is treated as the axis-title
- * graphic instead of a label, and its clearance from the label block is
- * measured.
- */
-function extractAxisLabels(svg: string, plotBottom: number, titleText?: string): RenderedAxis {
-	const textRe = /<text([^>]*)>([^<]*)<\/text>/g;
-	const byX = new Map<number, { innerY: number; text: string }[]>();
-	let rotated = false;
-	let labelBottomPx = -Infinity;
-	let titleTopPx: number | undefined;
-
-	let m: RegExpExecArray | null;
-	while ((m = textRe.exec(svg))) {
-		const attrs = m[1];
-		const text = m[2];
-
-		// Unrotated labels use translate(x y); rotated ones bake the rotation
-		// into a matrix(a,b,c,d,tx,ty) — a non-zero `b` term is the rotation.
-		let tx: number;
-		let ty: number;
-		let isRotated = false;
-		const translate = attrs.match(/transform="translate\(([\d.e+-]+)[ ,]+([\d.e+-]+)\)/);
-		const matrix = attrs.match(/transform="matrix\(([^)]+)\)"/);
-		if (translate) {
-			tx = Number(translate[1]);
-			ty = Number(translate[2]);
-			isRotated = /rotate\(/.test(attrs);
-		} else if (matrix) {
-			const parts = matrix[1].split(',').map(Number);
-			tx = parts[4];
-			ty = parts[5];
-			isRotated = parts[1] !== 0;
-		} else {
-			continue;
-		}
-
-		// Keep only text in the bottom axis gutter (+1 skips the y-axis "0"
-		// label that sits exactly on the plot's bottom edge).
-		if (!(ty > plotBottom + 1)) continue;
-
-		// `y` is the line's center offset within the translate; text is
-		// baseline-central, so the glyph box spans ±fontSize/2 around it.
-		const innerY = Number(attrs.match(/\by="([\d.e+-]+)"/)?.[1] ?? 0);
-		const centerY = ty + innerY;
-
-		if (titleText !== undefined && text === titleText) {
-			titleTopPx = centerY - X_AXIS_FONT_SIZE / 2;
-			continue;
-		}
-
-		if (isRotated) rotated = true;
-		labelBottomPx = Math.max(labelBottomPx, centerY + X_AXIS_FONT_SIZE / 2);
-
-		const key = Math.round(tx);
-		if (!byX.has(key)) byX.set(key, []);
-		byX.get(key)!.push({ innerY, text });
-	}
-
-	const labels = Array.from(byX.entries())
-		.sort(([a], [b]) => a - b)
-		.map(([, lines]) =>
-			lines
-				.sort((a, b) => a.innerY - b.innerY)
-				.map((l) => l.text)
-				.join('\n')
-		)
-		.filter((label) => label !== '');
-
-	return {
-		labels,
-		rotated,
-		...(titleTopPx !== undefined && Number.isFinite(labelBottomPx)
-			? { titleClearancePx: titleTopPx - labelBottomPx }
-			: {})
-	};
-}
 
 // ── Dataset builders ────────────────────────────────────────────────────────
 
@@ -426,6 +185,99 @@ describe('rendered x-axis labels (SSR, exact output per container width)', () =>
 
 		expect(rotated).toBe(false);
 		expect(labels).toEqual(['2022', 'Jul', '2023', 'Jul', '2024', 'Jul', '2025']);
+	});
+
+	it('15 scattered days across five months: regular month ticks, not a day number per point', () => {
+		// Sparse daily data used to pin a tick to every point and label it with a
+		// bare day number ("5 14 20 28 2 14 22 …") — unreadable across months.
+		const rows = [
+			[0, 5],
+			[0, 14],
+			[0, 20],
+			[0, 28],
+			[1, 2],
+			[1, 14],
+			[1, 22],
+			[2, 3],
+			[2, 18],
+			[3, 6],
+			[3, 16],
+			[3, 27],
+			[4, 8],
+			[4, 24],
+			[5, 12]
+		].map(([m, d], i) => ({
+			month: `2024-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+			revenue: 100 + i
+		}));
+		const { labels, rotated } = renderAxis({
+			width: 700,
+			rows,
+			columns: DATE_COLUMNS,
+			x: 'month',
+			y: 'revenue'
+		});
+
+		expect(rotated).toBe(false);
+		expect(labels).toEqual(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']);
+	});
+
+	it('thinned labels keep their context: the first visible tick of a month or year names it', () => {
+		// 12 weekly Mondays thinned to every other week: "May 6" and "Jun 3" are
+		// hidden, so May 13 and Jun 17 carry the month instead of reading "13", "17".
+		const weekly = Array.from({ length: 12 }, (_, i) => {
+			const d = new Date(2024, 3, 1 + i * 7);
+			return {
+				month: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+				revenue: 100 + i
+			};
+		});
+		expect(
+			renderAxis({
+				width: 340,
+				rows: weekly,
+				columns: DATE_COLUMNS,
+				x: 'month',
+				y: 'revenue',
+				seriesType: 'bar'
+			}).labels
+		).toEqual(['Apr 1', '15', '29', 'May 13', '27', 'Jun 17']);
+
+		// Five events over two years get 3-month ticks labelled as months; thinned
+		// at phone width the "2024" boundary stays visible.
+		const events = ['2023-02-14', '2023-06-02', '2023-11-20', '2024-03-09', '2024-09-30'].map(
+			(month, i) => ({ month, revenue: 100 + i })
+		);
+		expect(
+			renderAxis({ width: 340, rows: events, columns: DATE_COLUMNS, x: 'month', y: 'revenue' })
+				.labels
+		).toEqual(['Feb 2023', 'Jul', '2024', 'Jul']);
+	});
+
+	it('8 scattered days across Jan–Feb: one label per bar, month named at the rollover', () => {
+		const rows = [
+			[0, 20],
+			[0, 23],
+			[0, 27],
+			[0, 31],
+			[1, 2],
+			[1, 6],
+			[1, 9],
+			[1, 14]
+		].map(([m, d], i) => ({
+			month: `2024-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+			revenue: 100 + i
+		}));
+		const { labels, rotated } = renderAxis({
+			width: 700,
+			rows,
+			columns: DATE_COLUMNS,
+			x: 'month',
+			y: 'revenue'
+		});
+
+		expect(rotated).toBe(false);
+		expect(labels).toEqual(['Jan 20', '23', '27', '31', 'Feb 2', '6', '9', '14']);
 	});
 
 	it('3 years of weekly data: same year-anchored first tick as daily', () => {

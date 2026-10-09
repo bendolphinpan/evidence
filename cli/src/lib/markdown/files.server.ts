@@ -11,6 +11,10 @@ import {
 	type ParsedProjectRootFrontmatter,
 	type ParsedProjectLayout
 } from '@evidence/core/config/page-frontmatter-schema';
+import {
+	markdownFileKind,
+	type MarkdownFileKind
+} from '@evidence/core/config/markdown-file-kind';
 import { compareSidebarPosition } from '@evidence/core/utils/nav-tree';
 import { deslugify } from '@evidence/core/utils/deslugify';
 import type { PageSettings } from '@evidence/core/user-components/interfaces/project-settings';
@@ -46,6 +50,8 @@ export function parsePageSettings(content: string): PageSettings {
 	if (fm.page_width !== undefined) settings.page_width = fm.page_width;
 	if (fm.table_of_contents !== undefined) settings.table_of_contents = fm.table_of_contents;
 	if (fm.auto_refresh !== undefined) settings.auto_refresh = fm.auto_refresh;
+	if (fm.down_is_good !== undefined) settings.down_is_good = fm.down_is_good;
+	if (fm.downloads !== undefined) settings.downloads = fm.downloads;
 	return settings;
 }
 
@@ -91,6 +97,14 @@ export function resolvePageSettings(
 
 function getMarkdownType(content: string): string {
 	return parsePageFrontmatter(content).type ?? 'page';
+}
+
+const PARTIALS_DIR = 'partials';
+const COMPONENTS_DIR = 'components';
+
+/** Kind of a discovered file, via the classifier Studio's git ingest shares. */
+function kindOf(projectRootRelativeKey: string, content: string): MarkdownFileKind {
+	return markdownFileKind(projectRootRelativeKey, parsePageFrontmatter(content).type);
 }
 
 /**
@@ -349,7 +363,8 @@ export async function getProjectSignature(projectRoot: string): Promise<string> 
 	const roots: Array<{ dir: string; exts: readonly string[] }> = [
 		{ dir: pagesDir, exts: ['.md', '.sql'] },
 		{ dir: join(projectRoot, 'queries'), exts: ['.md', '.sql'] },
-		{ dir: join(projectRoot, 'partials'), exts: ['.md', '.sql'] },
+		{ dir: join(projectRoot, PARTIALS_DIR), exts: ['.md', '.sql'] },
+		{ dir: join(projectRoot, COMPONENTS_DIR), exts: ['.md', '.sql'] },
 		{ dir: join(projectRoot, 'metrics'), exts: ['.yaml', '.yml'] }
 	];
 	const parts = new Set<string>();
@@ -465,9 +480,9 @@ export async function discoverProjectPartials(
 ): Promise<Record<string, string>> {
 	const pagesDir = await resolvePagesDir(projectRoot);
 	const out: Record<string, string> = {};
-	for (const root of [pagesDir, join(projectRoot, 'partials')]) {
+	for (const root of [pagesDir, join(projectRoot, PARTIALS_DIR)]) {
 		await collectFilesByExt(root, projectRoot, ['.md'], (key, content) => {
-			if (getMarkdownType(content) === 'partial') out[key] = content;
+			if (kindOf(key, content) === 'partial') out[key] = content;
 		});
 	}
 	return out;
@@ -477,19 +492,17 @@ export async function discoverProjectPartials(
  * New project-root model: discover custom-component markdown files across
  * the project's top-level `components/` directory (also checked under
  * `pages/` so an author can colocate a component with the page that owns
- * it), keyed by their project-root-relative path (e.g.
- * `components/my_bar`). Detected by frontmatter `type: component` — a file
- * sitting in `components/` without that frontmatter is ignored, mirroring
- * how `discoverProjectPartials` requires `type: partial`.
+ * it), keyed by their project-root-relative path (e.g. `components/my_bar`).
+ * See `markdownFileKind` in core for how a file qualifies.
  */
 export async function discoverProjectComponents(
 	projectRoot: string
 ): Promise<Record<string, string>> {
 	const pagesDir = await resolvePagesDir(projectRoot);
 	const out: Record<string, string> = {};
-	for (const root of [pagesDir, join(projectRoot, 'components')]) {
+	for (const root of [pagesDir, join(projectRoot, COMPONENTS_DIR)]) {
 		await collectFilesByExt(root, projectRoot, ['.md'], (key, content) => {
-			if (getMarkdownType(content) === 'component') out[key] = content;
+			if (kindOf(key, content) === 'component') out[key] = content;
 		});
 	}
 	return out;

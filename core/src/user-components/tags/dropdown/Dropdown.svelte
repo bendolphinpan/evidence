@@ -147,7 +147,7 @@
 
 		const valueProcessed = processColumnExpression(
 			{
-				value: `DISTINCT ${valueColumn} as value`
+				value: `${valueColumn} as value`
 			},
 			connection.dialect
 		);
@@ -208,6 +208,8 @@
 			whereClause += ` AND ${searchCondition}`;
 		}
 
+		// Dedup via GROUP BY: inline DISTINCT emits `GROUP BY DISTINCT` (Cube rejects it), and
+		// SELECT DISTINCT would broaden dedup whenever `order` references a column outside value/label.
 		return {
 			tableExpressionName: table ?? '',
 			columns: baseQueryParts.columns,
@@ -353,9 +355,12 @@
 				selectedOptionsQuery.error !== null);
 		const hasQueryResults = optionsQuery.result !== undefined && !selectedRowsPending;
 		const hasStaticOptions = optionsFromProp.length > 0 || optionsFromChildren.length > 0;
+		// Static options alone mustn't switch validation on while query options are still unknown.
+		const optionsQueryPending =
+			(queryConfig !== undefined && optionsQuery.result === undefined) || selectedRowsPending;
 
 		const availableValues = new Set(combinedOptions.map((opt) => opt.value));
-		const validationOpts = { hasQueryResults, hasStaticOptions };
+		const validationOpts = { hasQueryResults, hasStaticOptions, optionsQueryPending };
 
 		if (multiple) {
 			// Filter out any selections that are no longer available. `isDropdownValueValid`
@@ -477,7 +482,7 @@
 </script>
 
 {#if title || info}
-	<Label for={id} class="mb-2">
+	<Label for={id} class="mb-2" data-input-title>
 		{title ?? formatTitle(id)}
 		{#if info}
 			<Info text={info} link={info_link} link_title={info_link_title} className="-mb-0.5" />

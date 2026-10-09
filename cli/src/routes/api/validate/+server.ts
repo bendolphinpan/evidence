@@ -25,7 +25,10 @@ import { withTimeout } from '$lib/timeout';
 import { process as processMarkdown } from '$lib/markdown';
 import { getProjectCwd } from '$lib/server/project-cwd';
 import { loadTranslations } from '$lib/server/translations.server';
+import { resolveProjectSettings } from '$lib/server/project-settings.server';
 import { loadConnectionConfig } from '$cli/connection';
+import { schemaAllowlist } from '@evidence/core/connectors/schema-allowlist';
+import { loadProjectConfig } from '$cli/project-config/load-config';
 import { loadCredentials } from '$lib/auth/credentials.server';
 import { ServerQueryService, type ConnectionType } from '$lib/server/ServerQueryService';
 import { Metadata } from '@evidence/core/metadata/Metadata.svelte';
@@ -139,6 +142,11 @@ export const GET: RequestHandler = async ({ url }) => {
 	// of reporting as undefined keys.
 	const translations = await loadTranslations(cwd, null);
 
+	// Same date settings the dev server renders with, so `{{ period.between }}`
+	// and relative date ranges introspect against the period the page will show.
+	const projectConfig = await loadProjectConfig(cwd).catch(() => null);
+	const projectSettings = await resolveProjectSettings(projectConfig?.date, queryService);
+
 	let totalErrors = 0;
 	let totalWarnings = 0;
 	const files: FileResult[] = [];
@@ -156,7 +164,8 @@ export const GET: RequestHandler = async ({ url }) => {
 					? projectRootRelativePath(cwd, file.path)
 					: undefined,
 				useRelativeResolution,
-				translations
+				translations,
+				projectSettings
 			});
 
 			const errors = validationErrors.map((err) => {
@@ -178,7 +187,10 @@ export const GET: RequestHandler = async ({ url }) => {
 				};
 			});
 
-			totalErrors += errors.filter((e) => e.severity === 'error').length;
+			// Markdoc reports structural errors (undefined tags, unclosed blocks) as 'critical'.
+			totalErrors += errors.filter(
+				(e) => e.severity === 'error' || e.severity === 'critical'
+			).length;
 			totalWarnings += errors.filter((e) => e.severity === 'warning').length;
 
 			files.push({
@@ -225,9 +237,11 @@ async function loadMetadata(cwd: string): Promise<{
 	metadataError?: string;
 }> {
 	let connectionType: ConnectionType = null;
+	let allowlist: string[] = [];
 	try {
 		const config = await loadConnectionConfig(cwd);
 		if (config) connectionType = config.type;
+		if (config) allowlist = schemaAllowlist(config.type, config);
 	} catch (e) {
 		return {
 			metadata: undefined,
@@ -258,7 +272,7 @@ async function loadMetadata(cwd: string): Promise<{
 			credentials?.organizationId ?? 'local',
 			connectionType
 		);
-		const metadata = new Metadata(queryService, { warehouseMode });
+		const metadata = new Metadata(queryService, { warehouseMode, schemaAllowlist: allowlist });
 		// Metadata.load() logs failures straight to console (warehouse driver +
 		// SDK noise) before throwing. We surface the reason via metadataError and
 		// degrade cleanly, so mute console for the load to avoid a scary dump.

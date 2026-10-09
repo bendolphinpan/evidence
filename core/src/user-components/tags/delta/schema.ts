@@ -4,7 +4,6 @@ import {
 	filtersExist,
 	tableExists,
 	columnsExistInTable,
-	validateDateAttributes,
 	validateDateRange,
 	validateComparison,
 	validateBenchmarkProperties,
@@ -29,10 +28,10 @@ const comparisonSchema = baseComparisonSchema
 	.extend({
 		down_is_good: z
 			.boolean({
-				description: 'Whether a downward trend is considered positive'
+				description:
+					"Whether a downward trend is considered positive. Defaults to the page's `down_is_good` setting."
 			})
 			.optional()
-			.default(false)
 	})
 	.optional();
 
@@ -188,7 +187,6 @@ export const schema = {
 		validateSqlExpression('comparison.benchmark.subject', 'data', 'select'),
 		validateSqlExpression('comparison.benchmark.value', 'data', 'select'),
 		validateSqlExpression('comparison.benchmark.within', 'data', 'select'),
-		validateDateAttributes(),
 		validateDateRange(),
 		validateComparison(),
 		validateBenchmarkProperties(),

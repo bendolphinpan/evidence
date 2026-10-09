@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { page } from '$app/state';
 	import { setQueryService } from '@evidence/core/QueryService.context';
 	import { setProjectSettingsContext } from '@evidence/core/project-settings.context';
 	import { setPageSettingsContext } from '@evidence/core/page-settings.context';
@@ -27,6 +29,7 @@
 	interface Props {
 		organizationId?: string;
 		connectionType?: ConnectionType;
+		schemaAllowlist?: string[];
 		serializedInlineQueries?: Record<string, string>;
 		serializedFilters?: SerializedFilters;
 		sqlFiles?: SqlFiles;
@@ -42,6 +45,7 @@
 	let {
 		organizationId = '',
 		connectionType = null,
+		schemaAllowlist = [],
 		serializedInlineQueries = {},
 		serializedFilters = {},
 		sqlFiles = {},
@@ -75,7 +79,8 @@
 	// Set up metadata so components that introspect tables/columns work.
 	// connectionType values match WarehouseMode names 1:1; null → managed engine.
 	const metadata = new Metadata(queryService, {
-		warehouseMode: connectionType ?? 'managed'
+		warehouseMode: connectionType ?? 'managed',
+		schemaAllowlist: () => schemaAllowlist
 	});
 	setMetadataContext(metadata);
 
@@ -88,7 +93,13 @@
 	// Create filter and inline query contexts
 	// Pass serialized filters so they're deserialized and available to components
 	// Pass SQL files so they can be referenced as data sources
-	const pageFilters = createPageFiltersContext(serializedFilters);
+	// Native history.replaceState, not SvelteKit's: the latter remounts {#key} layout blocks.
+	const pageFilters = createPageFiltersContext(serializedFilters, {
+		url: () => (browser ? new URL(window.location.href) : page.url),
+		updateUrl: (url) => {
+			window.history.replaceState(window.history.state, '', url.toString());
+		}
+	});
 	const inlineQueries = createInlineQueriesContext(
 		{ filterContexts: [pageFilters] },
 		serializedInlineQueries,

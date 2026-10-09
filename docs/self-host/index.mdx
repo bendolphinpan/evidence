@@ -51,6 +51,7 @@ Details may differ, but these steps are required for all Docker deployments.
    | `${VAR}` references       | All variables referenced in `connection.yaml`  | Yes       |
    | `EVIDENCE_AUTH_DISABLED`  | Skip auth entirely on trusted private networks | -         |
    | `PORT`                    | Port the server listens on (default: 3000)     | -         |
+   | `EVIDENCE_TELEMETRY_DISABLED` | Turn off the anonymous startup event and daily heartbeat ([details](/cli#telemetry)) | -         |
 
    \* Unless auth disabled
 
@@ -68,11 +69,11 @@ Self-hosting allows you to render your SQL + markdown into interactive reports �
 | [SQL models](/core-concepts/models)                    | —               | ✓                                        |
 | Auth                                                   | HTTP Basic Auth | SSO with viewer, developer & admin roles |
 | [Access controls](/features/page-level-access-control) | —               | ✓                                        |
-| [Row-level security](/features/access-rules)           | —               | ✓                                        |
+| [Row-level security](/features/row-level-security)           | —               | ✓                                        |
 | Developer Agent                                        | —               | ✓                                        |
 | Viewer Agent                                           | —               | ✓                                        |
 | Web editor & real-time collaboration                   | —               | ✓                                        |
-| [Embedded analytics](/features/embedded)               | —               | ✓                                        |
+| [Embedded analytics](/features/embedded-analytics)       | —               | ✓                                        |
 | [Studio MCP server](/mcp/studio)                       | —               | ✓                                        |
 
 ## Authentication

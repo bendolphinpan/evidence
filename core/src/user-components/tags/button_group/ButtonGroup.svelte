@@ -107,8 +107,9 @@
 			return;
 		}
 
+		// Dedup via GROUP BY: inline DISTINCT emits `GROUP BY DISTINCT`, which Cube rejects.
 		const valueProcessed = processColumnExpression(
-			{ value: `DISTINCT ${valueColumn} as value` },
+			{ value: `${valueColumn} as value` },
 			connection.dialect
 		);
 
@@ -241,7 +242,7 @@
 
 <div class="flex flex-col">
 	{#if title || info}
-		<Label for={id} class="mb-2">
+		<Label for={id} class="mb-2" data-input-title>
 			{title ?? formatTitle(id)}
 			{#if info}
 				<Info text={info} className="-mb-0.5" />
