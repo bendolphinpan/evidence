@@ -23,11 +23,14 @@
 		User,
 		RefreshCw,
 		Pencil,
-		SlidersHorizontal
+		SlidersHorizontal,
+		ListTree
 	} from 'lucide-svelte';
 	import { Query } from '@evidence/core/Query.svelte';
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import AiDock from '$lib/modules/AiDock.svelte';
+	import HeadingOutline from '$lib/modules/HeadingOutline.svelte';
 	import NewPageButton from '$lib/modules/NewPageButton.svelte';
 	import { setAnalysisProject } from '$lib/modules/analysis-context';
 	import GlobalFilterDrawer from '$lib/modules/GlobalFilterDrawer.svelte';
@@ -66,8 +69,15 @@
 			page.url.pathname !== '/login'
 	);
 
+	const OUTLINE_KEY = 'self-data-outline-open';
 	let aiOpen = $state(false);
 	let filterOpen = $state(false);
+	let outlineOpen = $state(true);
+
+	function setOutlineOpen(next: boolean) {
+		outlineOpen = next;
+		if (browser) localStorage.setItem(OUTLINE_KEY, next ? '1' : '0');
+	}
 
 	function refreshQueries() {
 		Query.refreshAll();
@@ -102,6 +112,8 @@
 	// Dev poll: user content is read at runtime, not in Vite's module graph, so HMR can't see it.
 	// Serve mode ships immutable content (restart to refresh), so no poll.
 	onMount(() => {
+		const savedOutline = localStorage.getItem(OUTLINE_KEY);
+		if (savedOutline === '0') outlineOpen = false;
 		if (data.isServe) return;
 		const interval = setInterval(async () => {
 			try {
@@ -376,6 +388,18 @@
 				>
 					<div class="flex items-center gap-2 px-4">
 						<Sidebar.Trigger class="-ml-1" />
+						{#if showPageTools}
+							<Button
+								variant={outlineOpen ? 'secondary' : 'ghost'}
+								size="sm"
+								class="h-8 text-xs"
+								aria-pressed={outlineOpen}
+								onclick={() => setOutlineOpen(!outlineOpen)}
+							>
+								<ListTree class="mr-1 h-3.5 w-3.5" />
+								大纲
+							</Button>
+						{/if}
 						{#if showPageTools && data.teProjectId}
 							<span class="text-muted-foreground hidden text-[11px] sm:inline"
 								>TE project {data.teProjectId}</span
@@ -463,6 +487,9 @@
 					</div>
 				</header>
 				<div class="flex min-h-0 min-w-0 flex-1">
+					{#if showPageTools && outlineOpen}
+						<HeadingOutline pathname={page.url.pathname} onClose={() => setOutlineOpen(false)} />
+					{/if}
 					<div class="report-viewport min-w-0 flex-1 overflow-auto overflow-x-hidden scroll-smooth">
 						{#key page.url.pathname}
 							{@render children()}
