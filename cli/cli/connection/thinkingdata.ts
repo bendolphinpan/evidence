@@ -203,7 +203,14 @@ function parseSqlResultText(
 		const headers: string[] = (payload.headers || payload.header || presetHeaders || []) as string[];
 		const rawRows = payload.rows || payload.list || payload.result || (Array.isArray(payload) ? payload : []);
 		if (Array.isArray(rawRows) && rawRows.length) {
-			const rows = rawRows
+			// querySql returns one row as a flat cell list [n1, x1, ...], and many rows as [[...], [...]].
+			const flatRow =
+				headers.length === rawRows.length &&
+				rawRows.every(
+					(item) => item === null || typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'
+				);
+			const normalized = flatRow ? [rawRows] : rawRows;
+			const rows = normalized
 				.slice(0, MAX_RESULT_ROWS)
 				.map((item: unknown) => alignRowToHeaders(headers, item));
 			const cols = headers.length ? headers : Object.keys(rows[0] || {});

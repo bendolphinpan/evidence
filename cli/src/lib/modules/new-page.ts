@@ -3,13 +3,15 @@ export function starterMarkdown(input: {
 	title: string;
 	projectId: string;
 	schema?: string;
+	group?: string;
 }): string {
 	const projectId = /^\d+$/.test(input.projectId) ? input.projectId : '51';
 	const schema = /^[A-Za-z_][A-Za-z0-9_]*$/.test(input.schema || '') ? input.schema : 'ta';
 	const title = input.title.trim() || input.slug;
+	const groupLine = input.group && input.group.trim() ? `group: ${JSON.stringify(input.group.trim())}\n` : '';
 	return `---
 title: ${JSON.stringify(title)}
-sidebar_position: 50
+${groupLine}sidebar_position: 50
 projectId: ${projectId}
 cards: true
 ---
@@ -66,11 +68,12 @@ export async function createReportPage(input: {
 	title: string;
 	projectId: string;
 	schema?: string;
+	group?: string;
 }): Promise<{ href: string } | { error: string }> {
 	const slug = input.slug.trim().toLowerCase();
 	const title = input.title.trim() || slug;
-	if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
-		return { error: '链接名只能用小写英文、数字和连字符，并且以字母开头' };
+	if (!/^[a-z][a-z0-9\/-]*$/.test(slug)) {
+		return { error: '链接名只能用小写英文、数字、斜杠和连字符，并且以字母开头' };
 	}
 	const res = await fetch('/api/modules/pages/create', {
 		method: 'POST',
@@ -80,7 +83,14 @@ export async function createReportPage(input: {
 			title,
 			projectId: input.projectId,
 			schema: input.schema,
-			markdown: starterMarkdown({ slug, title, projectId: input.projectId, schema: input.schema })
+			group: input.group,
+			markdown: starterMarkdown({
+				slug,
+				title,
+				projectId: input.projectId,
+				schema: input.schema,
+				group: input.group
+			})
 		})
 	});
 	const json = await res.json().catch(() => ({}));

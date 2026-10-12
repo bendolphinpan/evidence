@@ -22,8 +22,18 @@
 	// honour their explicit choice (mirrors the published viewer).
 	let collapsedDirectories = $state<Record<string, boolean>>({});
 
+	function isPathActive(href: string): boolean {
+		const normHref = href.split('?')[0].replace(/\/$/, '') || '/';
+		const normCurrent = currentPath.split('?')[0].replace(/\/$/, '') || '/';
+		return normHref === normCurrent;
+	}
+
 	function dirHasActivePage(dir: NavDirectory): boolean {
-		return dir.pages.some((p) => p.href === currentPath);
+		if (dir.pages.some((p) => isPathActive(p.href))) return true;
+		if (dir.directories && dir.directories.length > 0) {
+			return dir.directories.some((sub) => dirHasActivePage(sub));
+		}
+		return false;
 	}
 
 	function isDirectoryCollapsed(dir: NavDirectory): boolean {
@@ -51,10 +61,52 @@
 	{/if}
 {/snippet}
 
+{#snippet renderDirectory(dir: NavDirectory, depth: number = 0)}
+	{@const collapsed = isDirectoryCollapsed(dir)}
+	<Sidebar.MenuItem class={depth > 0 ? 'list-none' : ''}>
+		<Sidebar.MenuButton>
+			{#snippet child({ props })}
+				<button type="button" {...props} onclick={() => toggleDirectory(dir)}>
+					<ChevronRight
+						class="h-3.5 w-3.5 shrink-0 transition-transform {!collapsed ? 'rotate-90' : ''}"
+					/>
+					<Ellipsis class="w-full cursor-pointer">
+						{dir.name}
+					</Ellipsis>
+				</button>
+			{/snippet}
+		</Sidebar.MenuButton>
+
+		{#if !collapsed}
+			<div class="my-1 border-l pl-2">
+				{#each dir.pages as navPage (navPage.href)}
+					{@const isActive = isPathActive(navPage.href)}
+					<Sidebar.MenuButton {isActive}>
+						{#snippet child({ props })}
+							<a href={hrefOf(navPage.href)} {...props}>
+								{@render pageIcon(navPage, isActive)}
+								<Ellipsis class="w-full cursor-pointer">
+									{navPage.name}
+								</Ellipsis>
+							</a>
+						{/snippet}
+					</Sidebar.MenuButton>
+				{/each}
+
+				{#if dir.directories && dir.directories.length > 0}
+					{#each dir.directories as subDir (subDir.id)}
+						{@render renderDirectory(subDir, depth + 1)}
+					{/each}
+				{/if}
+			</div>
+		{/if}
+	</Sidebar.MenuItem>
+{/snippet}
+
 <Sidebar.Menu>
 	<!-- Root pages -->
 	{#each tree.rootPages as navPage (navPage.href)}
-		{@const isActive = navPage.href === currentPath}
+		{@const isActive = isPathActive(navPage.href)}
 		<Sidebar.MenuItem>
 			<Sidebar.MenuButton {isActive}>
 				{#snippet child({ props })}
@@ -71,38 +123,6 @@
 
 	<!-- Directories and their pages -->
 	{#each tree.directories as dir (dir.id)}
-		{@const collapsed = isDirectoryCollapsed(dir)}
-		<Sidebar.MenuItem>
-			<Sidebar.MenuButton>
-				{#snippet child({ props })}
-					<button type="button" {...props} onclick={() => toggleDirectory(dir)}>
-						<ChevronRight
-							class="h-3.5 w-3.5 shrink-0 transition-transform {!collapsed ? 'rotate-90' : ''}"
-						/>
-						<Ellipsis class="w-full cursor-pointer">
-							{dir.name}
-						</Ellipsis>
-					</button>
-				{/snippet}
-			</Sidebar.MenuButton>
-
-			{#if !collapsed}
-				<div class="my-1 border-l pl-1">
-					{#each dir.pages as navPage (navPage.href)}
-						{@const isActive = navPage.href === currentPath}
-						<Sidebar.MenuButton {isActive}>
-							{#snippet child({ props })}
-								<a href={hrefOf(navPage.href)} {...props}>
-									{@render pageIcon(navPage, isActive)}
-									<Ellipsis class="w-full cursor-pointer">
-										{navPage.name}
-									</Ellipsis>
-								</a>
-							{/snippet}
-						</Sidebar.MenuButton>
-					{/each}
-				</div>
-			{/if}
-		</Sidebar.MenuItem>
+		{@render renderDirectory(dir, 0)}
 	{/each}
 </Sidebar.Menu>

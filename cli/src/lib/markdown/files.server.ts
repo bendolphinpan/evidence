@@ -257,6 +257,8 @@ export interface NavItem {
 	sidebar_position?: number | null;
 	/** Frontmatter `icon`; rendered in the sidebar icon column. */
 	icon?: string | null;
+	/** Frontmatter `group` / `folder` / `category`. */
+	group?: string | string[] | null;
 }
 
 /** Resolved display name used for the alphabetical tiebreak and rendered label. */
@@ -266,8 +268,8 @@ function navDisplayName(item: NavItem): string {
 
 /**
  * Get navigation items for all markdown pages in the pages/ subdirectory.
- * Reads each file's frontmatter so the sidebar honors `title`, `sidebar_position`
- * and `icon`, and excludes partials — matching how Studio resolves the sidebar.
+ * Reads each file's frontmatter so the sidebar honors `title`, `sidebar_position`,
+ * `icon` and `group`, and excludes partials — matching how Studio resolves the sidebar.
  */
 export async function getNavItems(dir: string): Promise<NavItem[]> {
 	const pagesDir = await resolvePagesDir(dir);
@@ -306,7 +308,8 @@ export async function getNavItems(dir: string): Promise<NavItem[]> {
 					isHome: false,
 					title: meta.title,
 					sidebar_position: meta.sidebar_position,
-					icon: meta.icon
+					icon: meta.icon,
+					group: meta.group ?? meta.folder ?? meta.category ?? null
 				});
 			}
 		}

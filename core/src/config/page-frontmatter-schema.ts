@@ -149,6 +149,23 @@ export const projectRootPageFrontmatterSchema = z.object({
 		.describe(
 			'Download options in the published page menu. `false` hides all of them; `{ pdf: false }` hides only PDF (also `data`, `image`).'
 		),
+	group: z
+		.union([z.string(), z.array(z.string())])
+		.optional()
+		.catch(undefined)
+		.describe(
+			'Sidebar directory / group (e.g. "留存分析/用户留存" or ["留存分析", "用户留存"]).'
+		),
+	folder: z
+		.union([z.string(), z.array(z.string())])
+		.optional()
+		.catch(undefined)
+		.describe('Alias for group.'),
+	category: z
+		.union([z.string(), z.array(z.string())])
+		.optional()
+		.catch(undefined)
+		.describe('Alias for group.'),
 	workflow: workflowSchema
 		.optional()
 		.catch(undefined)

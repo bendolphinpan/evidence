@@ -123,6 +123,21 @@ describe('getNavItems', () => {
 			icon: 'shopping-cart'
 		});
 	});
+
+	it('reads group and folder from frontmatter', async () => {
+		await writeFile(
+			join(cwd, 'pages', 'retention.md'),
+			'---\ntitle: Retention\ngroup: Analysis/Core\n---\n# Retention\n'
+		);
+
+		const [item] = await getNavItems(cwd);
+
+		expect(item).toMatchObject({
+			slug: 'retention',
+			title: 'Retention',
+			group: 'Analysis/Core'
+		});
+	});
 });
 
 describe('getMarkdownFile', () => {

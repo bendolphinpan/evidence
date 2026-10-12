@@ -39,6 +39,7 @@ export interface NavDirectory {
 	id: string;
 	name: string;
 	pages: NavPage[];
+	directories: NavDirectory[];
 }
 
 export interface NavTree {
@@ -95,7 +96,8 @@ export function toNavTreeFromProject(
 					name: p.name,
 					href: hrefFor(`${dir.slug}/${p.slug}`),
 					icon: p.settings?.icon ?? null
-				}))
+				})),
+			directories: []
 		}))
 		.filter((dir) => dir.pages.length > 0);
 
@@ -112,19 +114,62 @@ export interface FlatNavItem {
 	title?: string;
 	/** Frontmatter `icon`; rendered in the sidebar icon column. */
 	icon?: string | null;
+	/** Frontmatter `sidebar_position`; lower sorts first. */
+	sidebar_position?: number | null;
+	/** Frontmatter `group` / `folder` / `category`; groups into folders/subfolders. */
+	group?: string | string[] | null;
 }
 
 /**
- * Build a `NavTree` from the CLI's flat list of discovered pages. Slugs
- * without a `/` become root pages; slugs nested under a folder are grouped
- * by their first path segment into a directory, mirroring the two-level
- * model the published sidebar uses. Items are emitted in the order given, so
+ * Extract directory segments for a navigation item.
+ * Honors explicit frontmatter `group` / `folder` first (supports 'a/b' or ['a', 'b']),
+ * then falls back to path segments in the file slug.
+ */
+export function getDirectorySegments(item: FlatNavItem): string[] {
+	if (item.isHome) return [];
+
+	if (item.group) {
+		if (Array.isArray(item.group)) {
+			const parts = item.group
+				.flatMap((g) => (typeof g === 'string' ? g.split('/') : []))
+				.map((s) => s.trim())
+				.filter(Boolean);
+			if (parts.length > 0) return parts;
+		} else if (typeof item.group === 'string' && item.group.trim()) {
+			const parts = item.group
+				.split('/')
+				.map((s) => s.trim())
+				.filter(Boolean);
+			if (parts.length > 0) return parts;
+		}
+	}
+
+	const segments = item.slug.split('/');
+	if (segments.length > 1) {
+		return segments.slice(0, -1);
+	}
+
+	return [];
+}
+
+interface DirNode {
+	id: string;
+	name: string;
+	pages: NavPage[];
+	subdirs: Map<string, DirNode>;
+	subdirOrder: string[];
+}
+
+/**
+ * Build a `NavTree` from the CLI's flat list of discovered pages.
+ * Supports arbitrary levels of nested subdirectories via filesystem path
+ * or frontmatter `group`/`folder`. Items are emitted in the order given, so
  * the caller is responsible for sorting (e.g. by `sidebar_position`) first.
  */
 export function buildNavTreeFromFlat(items: FlatNavItem[]): NavTree {
 	const rootPages: NavPage[] = [];
-	const dirOrder: string[] = [];
-	const dirPages = new Map<string, NavPage[]>();
+	const rootDirOrder: string[] = [];
+	const rootDirMap = new Map<string, DirNode>();
 	// PageNavTree keys its `{#each}` on `href`, so duplicates crash hydration
 	// with each_key_duplicate. Callers *should* dedupe upstream, but keep the
 	// sidebar defensive so a malformed input degrades to a first-wins nav
@@ -132,30 +177,64 @@ export function buildNavTreeFromFlat(items: FlatNavItem[]): NavTree {
 	const seenHrefs = new Set<string>();
 
 	for (const item of items) {
-		const href = item.isHome ? '/' : `/${item.slug}`;
+		const href = item.isHome
+			? '/'
+			: item.slug.startsWith('/')
+				? item.slug
+				: `/${item.slug}`;
 		if (seenHrefs.has(href)) continue;
 		seenHrefs.add(href);
-		const segments = item.slug.split('/');
-		const displayName = item.title ?? (item.isHome ? 'Home' : deslugify(item.name));
 
-		if (item.isHome || segments.length === 1) {
+		const displayName = item.title ?? (item.isHome ? 'Home' : deslugify(item.name));
+		const dirSegments = getDirectorySegments(item);
+
+		if (dirSegments.length === 0) {
 			rootPages.push({ name: displayName, href, icon: item.icon ?? null });
 			continue;
 		}
 
-		const dir = segments[0];
-		if (!dirPages.has(dir)) {
-			dirPages.set(dir, []);
-			dirOrder.push(dir);
+		let currentMap = rootDirMap;
+		let currentOrder = rootDirOrder;
+		let currentPath = '';
+
+		for (let i = 0; i < dirSegments.length; i++) {
+			const seg = dirSegments[i];
+			currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+
+			if (!currentMap.has(seg)) {
+				const node: DirNode = {
+					id: currentPath,
+					name: deslugify(seg),
+					pages: [],
+					subdirs: new Map(),
+					subdirOrder: []
+				};
+				currentMap.set(seg, node);
+				currentOrder.push(seg);
+			}
+
+			const node = currentMap.get(seg)!;
+			if (i === dirSegments.length - 1) {
+				node.pages.push({ name: displayName, href, icon: item.icon ?? null });
+			} else {
+				currentMap = node.subdirs;
+				currentOrder = node.subdirOrder;
+			}
 		}
-		dirPages.get(dir)?.push({ name: displayName, href, icon: item.icon ?? null });
 	}
 
-	const directories: NavDirectory[] = dirOrder.map((dir) => ({
-		id: dir,
-		name: deslugify(dir),
-		pages: dirPages.get(dir) ?? []
-	}));
+	function convertDirNode(node: DirNode): NavDirectory {
+		return {
+			id: node.id,
+			name: node.name,
+			pages: node.pages,
+			directories: node.subdirOrder.map((key) => convertDirNode(node.subdirs.get(key)!))
+		};
+	}
+
+	const directories: NavDirectory[] = rootDirOrder.map((key) =>
+		convertDirNode(rootDirMap.get(key)!)
+	);
 
 	return { rootPages, directories };
 }

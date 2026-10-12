@@ -41,6 +41,18 @@ describe('executeThinkingDataQuery', () => {
 		expect(calledUrl).toContain('token=test-token');
 	});
 
+	it('maps a one-row flat cell list back onto the header names', async () => {
+		vi.stubGlobal('fetch', async () =>
+			jsonResponse({
+				return_code: 0,
+				data: { headers: ['n1', 'x1', 'sig'], rows: [2698, 1145, '不显著'] }
+			})
+		);
+
+		const result = await executeThinkingDataQuery('SELECT 1 AS n1', config);
+		expect(result.rows).toEqual([{ n1: 2698, x1: 1145, sig: '不显著' }]);
+	});
+
 	it('rejects write statements before contacting OpenAPI', async () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);

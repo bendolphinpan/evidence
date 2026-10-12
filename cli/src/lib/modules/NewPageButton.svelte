@@ -9,6 +9,7 @@
 
 	let open = $state(false);
 	let title = $state('');
+	let group = $state('');
 	let message = $state('');
 	let busy = $state(false);
 
@@ -17,13 +18,19 @@
 		busy = true;
 		message = '';
 		try {
-			const result = await createReportPage({ slug: slugFromTitle(title), title, projectId });
+			const result = await createReportPage({
+				slug: slugFromTitle(title),
+				title,
+				group: group.trim() || undefined,
+				projectId
+			});
 			if ('error' in result) {
 				message = result.error;
 				return;
 			}
 			open = false;
 			title = '';
+			group = '';
 			await invalidateAll();
 			await goto(result.href);
 		} finally {
@@ -44,6 +51,7 @@
 	<form class="bg-card mx-2 mb-2 space-y-2 rounded-md border p-3 shadow-xs" onsubmit={submit}>
 		<div class="text-sm font-medium">新报告</div>
 		<Input class="h-8" placeholder="标题，例如 次日留存" bind:value={title} required />
+		<Input class="h-8" placeholder="文件夹/分组（可选，例如 留存分析 或 留存/下钻）" bind:value={group} />
 		{#if message}
 			<p class="text-destructive text-xs">{message}</p>
 		{/if}
